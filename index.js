@@ -70,21 +70,38 @@ function normalizeTweet(tweet) {
   };
 }
 
+async function sleep(ms) {
+  await new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function fetchFromXmd() {
   const url =
     "https://x.pcstyle.dev/api/v1/profiles/" +
     encodeURIComponent(X_HANDLE) +
     "?format=json&limit=20";
 
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": USER_AGENT,
-      "Accept": "application/json"
-    }
-  });
+  let response;
 
-  if (!response.ok) {
-    const retryAfter = response.headers.get("retry-after");
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    response = await fetch(url, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json"
+      }
+    });
+
+    if (response.ok) break;
+
+    const retryAfter = Number(response.headers.get("retry-after") || 30);
+
+    if (attempt < 3 && (response.status === 429 || response.status === 503)) {
+      console.warn(
+        `x.md returned HTTP ${response.status}; retrying in ${retryAfter}s (attempt ${attempt}/3)...`
+      );
+      await sleep(Math.min(Math.max(retryAfter, 5), 60) * 1000);
+      continue;
+    }
+
     throw new Error(
       `x.md request failed: HTTP ${response.status}` +
       (retryAfter ? ` (retry after ${retryAfter}s)` : "")
