@@ -70,7 +70,62 @@ function normalizeTweet(tweet) {
   };
 }
 
-async function fetchRecentPosts() {
+async function fetchFromXmd() {
+  const url =
+    "https://x.pcstyle.dev/api/v1/profiles/" +
+    encodeURIComponent(X_HANDLE) +
+    "?format=json&limit=20";
+
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      "Accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    const retryAfter = response.headers.get("retry-after");
+    throw new Error(
+      `x.md request failed: HTTP ${response.status}` +
+      (retryAfter ? ` (retry after ${retryAfter}s)` : "")
+    );
+  }
+
+  const data = await response.json();
+  const rawPosts = Array.isArray(data.posts) ? data.posts : [];
+
+  const posts = rawPosts.map(tweet => {
+    const id = String(tweet.id_str || tweet.id || tweet.rest_id || "");
+    const handle =
+      tweet.user?.screen_name ||
+      tweet.author?.screen_name ||
+      tweet.author?.username ||
+      X_HANDLE;
+    const text =
+      tweet.full_text ||
+      tweet.text ||
+      tweet.content ||
+      tweet.legacy?.full_text ||
+      "";
+    const url =
+      tweet.url ||
+      tweet.permalink ||
+      (id ? `https://x.com/${handle}/status/${id}` : "");
+
+    return {
+      id,
+      text,
+      url: url.startsWith("http") ? url : `https://x.com${url}`,
+      createdAt: tweet.created_at || tweet.createdAt || null,
+      reply: isReply(tweet),
+      repost: isRepost(tweet)
+    };
+  }).filter(post => post.id && post.url);
+
+  return posts;
+}
+
+async function fetchFromSyndication() {
   const url =
     "https://syndication.twitter.com/srv/timeline-profile/screen-name/" +
     encodeURIComponent(X_HANDLE);
@@ -90,10 +145,24 @@ async function fetchRecentPosts() {
   const data = extractNextData(html);
   const entries = data?.props?.pageProps?.timeline?.entries || [];
 
-  let posts = entries
+  return entries
     .filter(entry => entry?.type === "tweet" && entry?.content?.tweet)
     .map(entry => normalizeTweet(entry.content.tweet))
     .filter(post => post.id);
+}
+
+async function fetchRecentPosts() {
+  let posts;
+
+  try {
+    posts = await fetchFromXmd();
+    console.log(`Fetched ${posts.length} posts from x.md.`);
+  } catch (primaryError) {
+    console.warn(`Primary X source failed: ${primaryError.message}`);
+    console.warn("Trying X syndication fallback...");
+    posts = await fetchFromSyndication();
+    console.log(`Fetched ${posts.length} posts from X syndication fallback.`);
+  }
 
   if (INCLUDE_REPLIES.toLowerCase() !== "true") {
     posts = posts.filter(post => !post.reply);
