@@ -10,7 +10,8 @@ const {
   INITIALIZE_ONLY = "true",
   MAX_POSTS_PER_RUN = "5",
   INCLUDE_REPLIES = "false",
-  INCLUDE_REPOSTS = "false"
+  INCLUDE_REPOSTS = "false",
+  TEST_ONCE = "false"
 } = process.env;
 
 if (!DISCORD_WEBHOOK_URL && !(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID)) {
@@ -265,6 +266,15 @@ async function main() {
     state.lastRun = new Date().toISOString();
     await writeState(state);
     console.log(`Initialized with ${state.seen.length} existing posts. Nothing sent.`);
+    return;
+  }
+
+  if (TEST_ONCE.toLowerCase() === "true") {
+    const latest = posts[0];
+    console.log(`Test mode: sending latest post ${latest.url}`);
+    await sendDiscord(latest);
+    await sendTelegram(latest);
+    console.log("Test message sent.");
     return;
   }
 
