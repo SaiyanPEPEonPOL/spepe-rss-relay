@@ -24,9 +24,20 @@ const USER_AGENT =
 
 async function readState() {
   try {
-    return JSON.parse(await fs.readFile(STATE_FILE, "utf8"));
+    const state = JSON.parse(await fs.readFile(STATE_FILE, "utf8"));
+    const legacySeen = Array.isArray(state.seen) ? state.seen : [];
+    return {
+      ...state,
+      discordSeen: Array.isArray(state.discordSeen) ? state.discordSeen : legacySeen,
+      telegramSeen: Array.isArray(state.telegramSeen) ? state.telegramSeen : legacySeen,
+      initialized: Boolean(state.initialized)
+    };
   } catch {
-    return { seen: [], initialized: false };
+    return {
+      discordSeen: [],
+      telegramSeen: [],
+      initialized: false
+    };
   }
 }
 
@@ -202,6 +213,8 @@ async function sendDiscord(post) {
   if (!DISCORD_WEBHOOK_URL) return;
 
   const content = [
+    "@everyone",
+    "",
     "🐸⚡ **NEW $SPEPE TRANSMISSION**",
     "",
     itemText(post),
@@ -215,7 +228,7 @@ async function sendDiscord(post) {
     body: JSON.stringify({
       username: RELAY_NAME,
       content,
-      allowed_mentions: { parse: [] }
+      allowed_mentions: { parse: ["everyone"] }
     })
   });
 
@@ -261,11 +274,13 @@ async function main() {
   }
 
   if (!state.initialized && INITIALIZE_ONLY.toLowerCase() === "true") {
-    state.seen = posts.slice(0, 50).map(post => post.id);
+    const existing = posts.slice(0, 50).map(post => post.id);
+    state.discordSeen = existing;
+    state.telegramSeen = existing;
     state.initialized = true;
     state.lastRun = new Date().toISOString();
     await writeState(state);
-    console.log(`Initialized with ${state.seen.length} existing posts. Nothing sent.`);
+    console.log(`Initialized with ${existing.length} existing posts. Nothing sent.`);
     return;
   }
 
@@ -278,25 +293,53 @@ async function main() {
     return;
   }
 
-  const seen = new Set(state.seen || []);
+  const discordSeen = new Set(state.discordSeen || []);
+  const telegramSeen = new Set(state.telegramSeen || []);
+
   const newPosts = posts
-    .filter(post => !seen.has(post.id))
+    .filter(post => !discordSeen.has(post.id) || !telegramSeen.has(post.id))
     .slice(0, Number(MAX_POSTS_PER_RUN))
     .reverse();
 
+  let deliveredAnything = false;
+
   for (const post of newPosts) {
-    await sendDiscord(post);
-    await sendTelegram(post);
-    seen.add(post.id);
-    console.log(`Relayed: ${post.url}`);
+    if (DISCORD_WEBHOOK_URL && !discordSeen.has(post.id)) {
+      try {
+        await sendDiscord(post);
+        discordSeen.add(post.id);
+        state.discordSeen = Array.from(discordSeen).slice(-100);
+        state.lastRun = new Date().toISOString();
+        await writeState(state);
+        deliveredAnything = true;
+        console.log(`Discord relayed: ${post.url}`);
+      } catch (err) {
+        console.error(`Discord delivery failed for ${post.url}: ${err.message}`);
+      }
+    }
+
+    if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID && !telegramSeen.has(post.id)) {
+      try {
+        await sendTelegram(post);
+        telegramSeen.add(post.id);
+        state.telegramSeen = Array.from(telegramSeen).slice(-100);
+        state.lastRun = new Date().toISOString();
+        await writeState(state);
+        deliveredAnything = true;
+        console.log(`Telegram relayed: ${post.url}`);
+      } catch (err) {
+        console.error(`Telegram delivery failed for ${post.url}: ${err.message}`);
+      }
+    }
   }
 
-  state.seen = Array.from(new Set([...posts.map(post => post.id), ...seen])).slice(0, 100);
+  state.discordSeen = Array.from(new Set([...posts.map(post => post.id), ...discordSeen])).slice(0, 100);
+  state.telegramSeen = Array.from(telegramSeen).slice(-100);
   state.initialized = true;
   state.lastRun = new Date().toISOString();
-
   await writeState(state);
-  console.log(newPosts.length ? `Relayed ${newPosts.length} new post(s).` : "No new posts.");
+
+  console.log(deliveredAnything ? "Relay run completed with new deliveries." : "No new posts to deliver.");
 }
 
 main().catch(err => {
