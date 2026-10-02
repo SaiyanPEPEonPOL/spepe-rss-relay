@@ -1,27 +1,25 @@
 import fs from "node:fs/promises";
-import Parser from "rss-parser";
 
 const {
-  RSS_URL,
+  X_HANDLE = "SaiyanPEPE",
   DISCORD_WEBHOOK_URL,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
   RELAY_NAME = "SPEPE Relay",
   STATE_FILE = "state.json",
   INITIALIZE_ONLY = "true",
-  MAX_POSTS_PER_RUN = "5"
+  MAX_POSTS_PER_RUN = "5",
+  INCLUDE_REPLIES = "false",
+  INCLUDE_REPOSTS = "false"
 } = process.env;
-
-if (!RSS_URL) throw new Error("Missing RSS_URL GitHub secret.");
 
 if (!DISCORD_WEBHOOK_URL && !(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID)) {
   throw new Error("Configure Discord and/or Telegram destination secrets.");
 }
 
-const parser = new Parser({
-  timeout: 15000,
-  headers: { "User-Agent": "Mozilla/5.0 SPEPE-RSS-Relay/1.0" }
-});
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 async function readState() {
   try {
@@ -35,43 +33,93 @@ async function writeState(state) {
   await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2) + "\n");
 }
 
-function stripHtml(input = "") {
-  return input
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
-}
-
-function getId(item) {
-  return item.guid || item.id || item.link || `${item.title}|${item.pubDate}`;
-}
-
-function xLinkFromItem(item) {
-  const link = item.link || "";
-  const match = link.match(/\/([^/?#]+)\/status\/(\d+)/);
-  return match ? `https://x.com/${match[1]}/status/${match[2]}` : link;
-}
-
-function itemText(item) {
-  const raw = stripHtml(
-    item.contentSnippet || item.title || item.content || item.summary || ""
+function extractNextData(html) {
+  const match = html.match(
+    /<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i
   );
-  return raw.length > 1400 ? raw.slice(0, 1397) + "..." : raw;
+  if (!match) {
+    throw new Error("X syndication response did not contain __NEXT_DATA__.");
+  }
+  return JSON.parse(match[1]);
 }
 
-async function sendDiscord(item) {
+function isReply(tweet) {
+  return Boolean(
+    tweet.in_reply_to_status_id_str ||
+    tweet.in_reply_to_user_id_str ||
+    tweet.in_reply_to_screen_name
+  );
+}
+
+function isRepost(tweet) {
+  return Boolean(tweet.retweeted_status || /^RT\s+@/i.test(tweet.full_text || tweet.text || ""));
+}
+
+function normalizeTweet(tweet) {
+  const id = String(tweet.id_str || tweet.id || "");
+  const handle = tweet.user?.screen_name || X_HANDLE;
+  return {
+    id,
+    text: tweet.full_text || tweet.text || "",
+    url: tweet.permalink
+      ? `https://x.com${tweet.permalink}`
+      : `https://x.com/${handle}/status/${id}`,
+    createdAt: tweet.created_at || null,
+    reply: isReply(tweet),
+    repost: isRepost(tweet)
+  };
+}
+
+async function fetchRecentPosts() {
+  const url =
+    "https://syndication.twitter.com/srv/timeline-profile/screen-name/" +
+    encodeURIComponent(X_HANDLE);
+
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      "Accept": "text/html,application/xhtml+xml"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`X syndication request failed: HTTP ${response.status}`);
+  }
+
+  const html = await response.text();
+  const data = extractNextData(html);
+  const entries = data?.props?.pageProps?.timeline?.entries || [];
+
+  let posts = entries
+    .filter(entry => entry?.type === "tweet" && entry?.content?.tweet)
+    .map(entry => normalizeTweet(entry.content.tweet))
+    .filter(post => post.id);
+
+  if (INCLUDE_REPLIES.toLowerCase() !== "true") {
+    posts = posts.filter(post => !post.reply);
+  }
+
+  if (INCLUDE_REPOSTS.toLowerCase() !== "true") {
+    posts = posts.filter(post => !post.repost);
+  }
+
+  return posts;
+}
+
+function itemText(post) {
+  const text = post.text.trim();
+  return text.length > 1400 ? text.slice(0, 1397) + "..." : text;
+}
+
+async function sendDiscord(post) {
   if (!DISCORD_WEBHOOK_URL) return;
+
   const content = [
     "🐸⚡ **NEW $SPEPE TRANSMISSION**",
     "",
-    itemText(item),
+    itemText(post),
     "",
-    xLinkFromItem(item)
+    post.url
   ].filter(Boolean).join("\n");
 
   const response = await fetch(DISCORD_WEBHOOK_URL, {
@@ -89,15 +137,15 @@ async function sendDiscord(item) {
   }
 }
 
-async function sendTelegram(item) {
+async function sendTelegram(post) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
 
   const text = [
     "🐸⚡ NEW $SPEPE TRANSMISSION",
     "",
-    itemText(item),
+    itemText(post),
     "",
-    xLinkFromItem(item)
+    post.url
   ].filter(Boolean).join("\n");
 
   const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -117,46 +165,42 @@ async function sendTelegram(item) {
 }
 
 async function main() {
-  const feed = await parser.parseURL(RSS_URL);
+  const posts = await fetchRecentPosts();
   const state = await readState();
 
-  const items = (feed.items || []).map(item => ({
-    ...item,
-    _id: getId(item)
-  }));
-
-  if (!items.length) {
-    console.log("Feed returned no items.");
+  if (!posts.length) {
+    console.log(`No eligible posts found for @${X_HANDLE}.`);
     return;
   }
 
   if (!state.initialized && INITIALIZE_ONLY.toLowerCase() === "true") {
-    state.seen = items.slice(0, 50).map(i => i._id);
+    state.seen = posts.slice(0, 50).map(post => post.id);
     state.initialized = true;
+    state.lastRun = new Date().toISOString();
     await writeState(state);
-    console.log(`Initialized with ${state.seen.length} existing feed items. Nothing sent.`);
+    console.log(`Initialized with ${state.seen.length} existing posts. Nothing sent.`);
     return;
   }
 
   const seen = new Set(state.seen || []);
-  const newItems = items
-    .filter(item => !seen.has(item._id))
+  const newPosts = posts
+    .filter(post => !seen.has(post.id))
     .slice(0, Number(MAX_POSTS_PER_RUN))
     .reverse();
 
-  for (const item of newItems) {
-    await sendDiscord(item);
-    await sendTelegram(item);
-    seen.add(item._id);
-    console.log(`Relayed: ${item.title || item.link || item._id}`);
+  for (const post of newPosts) {
+    await sendDiscord(post);
+    await sendTelegram(post);
+    seen.add(post.id);
+    console.log(`Relayed: ${post.url}`);
   }
 
-  state.seen = Array.from(new Set([...items.map(i => i._id), ...seen])).slice(0, 100);
+  state.seen = Array.from(new Set([...posts.map(post => post.id), ...seen])).slice(0, 100);
   state.initialized = true;
   state.lastRun = new Date().toISOString();
 
   await writeState(state);
-  console.log(newItems.length ? `Relayed ${newItems.length} new item(s).` : "No new items.");
+  console.log(newPosts.length ? `Relayed ${newPosts.length} new post(s).` : "No new posts.");
 }
 
 main().catch(err => {
