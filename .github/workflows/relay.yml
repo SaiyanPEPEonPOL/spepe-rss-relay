@@ -1,4 +1,4 @@
-name: SPEPE RSS Relay
+name: SPEPE X Relay
 
 on:
   schedule:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: spepe-rss-relay
+  group: spepe-x-relay
   cancel-in-progress: false
 
 jobs:
@@ -25,18 +25,17 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Check RSS and relay new posts
+      - name: Check X and relay new posts
         env:
-          RSS_URL: ${{ secrets.RSS_URL }}
+          X_HANDLE: "SaiyanPEPE"
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           RELAY_NAME: "SPEPE Relay"
           INITIALIZE_ONLY: "true"
           MAX_POSTS_PER_RUN: "5"
+          INCLUDE_REPLIES: "false"
+          INCLUDE_REPOSTS: "false"
         run: node index.js
 
       - name: Save relay state
