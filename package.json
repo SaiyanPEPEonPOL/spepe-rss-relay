@@ -1,13 +1,10 @@
 {
-  "name": "spepe-rss-relay",
-  "version": "1.0.0",
+  "name": "spepe-x-relay",
+  "version": "2.0.0",
   "private": true,
-  "description": "Free RSS-to-Discord-and-Telegram relay for X posts",
+  "description": "Free X-to-Discord-and-Telegram relay for @SaiyanPEPE",
   "type": "module",
   "scripts": {
     "start": "node index.js"
-  },
-  "dependencies": {
-    "rss-parser": "^3.13.0"
   }
 }
