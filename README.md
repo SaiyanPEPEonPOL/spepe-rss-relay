@@ -1,28 +1,65 @@
-# SPEPE RSS Relay
+# SPEPE X Relay
 
-A tiny feed-agnostic relay that checks an RSS/Atom feed for new X posts and forwards new items to Discord and Telegram.
+A free relay for **@SaiyanPEPE** that checks X's public syndication timeline and forwards new posts to Discord and/or Telegram.
+
+No X API key and no RSS feed are required.
+
+## How it works
+
+GitHub Actions runs every 5 minutes and fetches the public embedded timeline for:
+
+`@SaiyanPEPE`
+
+It remembers post IDs in `state.json`, so the same post is not sent twice.
+
+By default it forwards original posts only. Replies and reposts are ignored.
 
 ## Required GitHub secrets
 
-Add these under **Settings → Secrets and variables → Actions**:
+Add these under:
 
-- `RSS_URL` — an RSS/Atom feed for the X account
-- `DISCORD_WEBHOOK_URL` — optional if you only want Telegram
-- `TELEGRAM_BOT_TOKEN` — optional if you only want Discord
-- `TELEGRAM_CHAT_ID` — required with the Telegram bot token
+**Settings → Secrets and variables → Actions**
 
-At least one destination must be configured.
+### Discord
+
+`DISCORD_WEBHOOK_URL`
+
+### Telegram
+
+`TELEGRAM_BOT_TOKEN`
+
+`TELEGRAM_CHAT_ID`
+
+You can configure Discord only, Telegram only, or both.
+
+There is no longer an `RSS_URL` secret.
 
 ## First run
 
-Run **Actions → SPEPE RSS Relay → Run workflow**.
+Open:
 
-The first run records existing feed items and sends nothing so old posts do not flood your channels.
+**Actions → SPEPE X Relay → Run workflow**
 
-## Schedule
+The first run records the posts already visible in the X timeline and sends nothing. This prevents old posts from flooding the channels.
 
-The workflow checks every 5 minutes.
+After that, new eligible posts are forwarded automatically.
+
+## Settings
+
+The workflow currently uses:
+
+- X handle: `SaiyanPEPE`
+- check interval: every 5 minutes
+- replies: excluded
+- reposts: excluded
+- max posts sent in one run: 5
+
+## Important limitation
+
+This uses X's public syndication/embed endpoint rather than the paid X API. It requires no login or API key, but it is unofficial for this use case and X can change or rate-limit it.
+
+If that happens, the Discord/Telegram relay can stay intact and only the X fetcher needs to be replaced.
 
 ## Security
 
-Never commit Discord webhook URLs, Telegram bot tokens, account cookies, or other credentials into this repository. Use GitHub Actions secrets.
+Never commit Discord webhook URLs, Telegram bot tokens, cookies, or other credentials into the repository. Store them only as GitHub Actions secrets.
