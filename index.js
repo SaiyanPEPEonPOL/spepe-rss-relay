@@ -25,18 +25,18 @@ const USER_AGENT =
 async function readState() {
   try {
     const state = JSON.parse(await fs.readFile(STATE_FILE, "utf8"));
-    const legacySeen = Array.isArray(state.seen) ? state.seen : [];
     return {
-      ...state,
-      discordSeen: Array.isArray(state.discordSeen) ? state.discordSeen : legacySeen,
-      telegramSeen: Array.isArray(state.telegramSeen) ? state.telegramSeen : legacySeen,
-      initialized: Boolean(state.initialized)
+      discordSeen: Array.isArray(state.discordSeen) ? state.discordSeen : [],
+      telegramSeen: Array.isArray(state.telegramSeen) ? state.telegramSeen : [],
+      initialized: Boolean(state.initialized),
+      lastRun: state.lastRun || null
     };
   } catch {
     return {
       discordSeen: [],
       telegramSeen: [],
-      initialized: false
+      initialized: false,
+      lastRun: null
     };
   }
 }
@@ -275,8 +275,8 @@ async function main() {
 
   if (!state.initialized && INITIALIZE_ONLY.toLowerCase() === "true") {
     const existing = posts.slice(0, 50).map(post => post.id);
-    state.discordSeen = existing;
-    state.telegramSeen = existing;
+    state.discordSeen = [...existing];
+    state.telegramSeen = [...existing];
     state.initialized = true;
     state.lastRun = new Date().toISOString();
     await writeState(state);
@@ -333,8 +333,8 @@ async function main() {
     }
   }
 
-  state.discordSeen = Array.from(new Set([...posts.map(post => post.id), ...discordSeen])).slice(0, 100);
-  state.telegramSeen = Array.from(telegramSeen).slice(-100);
+  state.discordSeen = Array.from(new Set(discordSeen)).slice(-100);
+  state.telegramSeen = Array.from(new Set(telegramSeen)).slice(-100);
   state.initialized = true;
   state.lastRun = new Date().toISOString();
   await writeState(state);
