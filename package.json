@@ -1,0 +1,13 @@
+{
+  "name": "spepe-rss-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Free RSS-to-Discord-and-Telegram relay for X posts",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "rss-parser": "^3.13.0"
+  }
+}
