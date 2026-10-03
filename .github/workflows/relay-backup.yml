@@ -1,0 +1,52 @@
+name: SPEPE X Relay Backup
+
+on:
+  schedule:
+    - cron: "14,44 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: spepe-x-relay
+  cancel-in-progress: false
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check X and relay new posts
+        env:
+          X_HANDLE: "SaiyanPEPE"
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RELAY_NAME: "SPEPE Relay"
+          INITIALIZE_ONLY: "true"
+          MAX_POSTS_PER_RUN: "5"
+          INCLUDE_REPLIES: "false"
+          INCLUDE_REPOSTS: "false"
+          TEST_ONCE: "false"
+        run: node index.js
+
+      - name: Save relay state
+        run: |
+          if git diff --quiet -- state.json; then
+            echo "No state changes."
+            exit 0
+          fi
+          git config user.name "spepe-relay-bot"
+          git config user.email "spepe-relay-bot@users.noreply.github.com"
+          git add state.json
+          git commit -m "chore: update relay state"
+          git push
