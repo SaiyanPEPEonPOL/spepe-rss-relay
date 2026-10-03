@@ -204,6 +204,16 @@ async function fetchRecentPosts() {
   return posts;
 }
 
+function tweetTimestampMs(post) {
+  try {
+    const id = BigInt(post.id);
+    return Number((id >> 22n) + 1288834974657n);
+  } catch {
+    const parsed = Date.parse(post.createdAt || "");
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+}
+
 function itemText(post) {
   const text = post.text.trim();
   return text.length > 1400 ? text.slice(0, 1397) + "..." : text;
@@ -296,10 +306,18 @@ async function main() {
   const discordSeen = new Set(state.discordSeen || []);
   const telegramSeen = new Set(state.telegramSeen || []);
 
+  const lastRunMs = state.lastRun ? Date.parse(state.lastRun) : Date.now();
+  const freshnessFloorMs = Number.isFinite(lastRunMs) ? lastRunMs : Date.now();
+
   const newPosts = posts
-    .filter(post => !discordSeen.has(post.id) || !telegramSeen.has(post.id))
-    .slice(0, Number(MAX_POSTS_PER_RUN))
-    .reverse();
+    .filter(post => {
+      const postTime = tweetTimestampMs(post);
+      const unseenSomewhere = !discordSeen.has(post.id) || !telegramSeen.has(post.id);
+      const actuallyNew = postTime > freshnessFloorMs;
+      return unseenSomewhere && actuallyNew;
+    })
+    .sort((a, b) => tweetTimestampMs(a) - tweetTimestampMs(b))
+    .slice(0, Number(MAX_POSTS_PER_RUN));
 
   let deliveredAnything = false;
 
