@@ -2,7 +2,7 @@ name: SPEPE X Relay
 
 on:
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -36,6 +36,7 @@ jobs:
           MAX_POSTS_PER_RUN: "5"
           INCLUDE_REPLIES: "false"
           INCLUDE_REPOSTS: "false"
+          MAX_REPLY_AGE_MINUTES: "30"
           TEST_ONCE: "false"
         run: node index.js
 
