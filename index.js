@@ -131,16 +131,15 @@ async function sleep(ms) {
   await new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function fetchFromXmdSearch() {
+async function fetchXmdSearchQuery(query) {
   const params = new URLSearchParams({
-    q: `from:${X_HANDLE}`,
+    q: query,
     feed: "latest",
     format: "json",
     limit: "20"
   });
 
   const url = "https://x.pcstyle.dev/api/v1/search?" + params.toString();
-
   let response;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -170,35 +169,63 @@ async function fetchFromXmdSearch() {
   }
 
   const data = await response.json();
-  const rawPosts = Array.isArray(data.posts) ? data.posts : [];
+  return Array.isArray(data.posts) ? data.posts : [];
+}
 
-  return rawPosts.map(tweet => {
-    const id = String(tweet.id_str || tweet.id || tweet.rest_id || "");
-    const handle =
-      tweet.user?.screen_name ||
-      tweet.author?.screen_name ||
-      tweet.author?.username ||
-      X_HANDLE;
-    const text =
-      tweet.full_text ||
-      tweet.text ||
-      tweet.content ||
-      tweet.legacy?.full_text ||
-      "";
-    const url =
-      tweet.url ||
-      tweet.permalink ||
-      (id ? `https://x.com/${handle}/status/${id}` : "");
+function normalizeXmdTweet(tweet) {
+  const id = String(tweet.id_str || tweet.id || tweet.rest_id || "");
+  const handle =
+    tweet.user?.screen_name ||
+    tweet.author?.screen_name ||
+    tweet.author?.username ||
+    X_HANDLE;
+  const text =
+    tweet.full_text ||
+    tweet.text ||
+    tweet.content ||
+    tweet.legacy?.full_text ||
+    "";
+  const url =
+    tweet.url ||
+    tweet.permalink ||
+    (id ? `https://x.com/${handle}/status/${id}` : "");
 
-    return {
-      id,
-      text,
-      url: url.startsWith("http") ? url : `https://x.com${url}`,
-      createdAt: tweet.created_at || tweet.createdAt || null,
-      reply: isReply(tweet),
-      repost: isRepost(tweet)
-    };
-  }).filter(post => post.id && post.url);
+  return {
+    id,
+    text,
+    url: url.startsWith("http") ? url : `https://x.com${url}`,
+    createdAt: tweet.created_at || tweet.createdAt || null,
+    reply: isReply(tweet),
+    repost: isRepost(tweet)
+  };
+}
+
+async function fetchFromXmdSearch() {
+  const [allRaw, originalsRaw] = await Promise.all([
+    fetchXmdSearchQuery(`from:${X_HANDLE}`),
+    fetchXmdSearchQuery(`from:${X_HANDLE} -filter:replies`)
+  ]);
+
+  const originalIds = new Set(
+    originalsRaw
+      .map(tweet => String(tweet.id_str || tweet.id || tweet.rest_id || ""))
+      .filter(Boolean)
+  );
+
+  const posts = allRaw
+    .map(normalizeXmdTweet)
+    .filter(post => post.id && post.url)
+    .map(post => ({
+      ...post,
+      // Only a post positively present in the no-replies search may ping everyone.
+      reply: !originalIds.has(post.id)
+    }));
+
+  console.log(
+    `x.md live search classified ${posts.filter(post => post.reply).length} repl${posts.filter(post => post.reply).length === 1 ? "y" : "ies"} and ${posts.filter(post => !post.reply).length} original post(s).`
+  );
+
+  return posts;
 }
 
 async function fetchFromXmdProfile() {
@@ -298,10 +325,6 @@ async function fetchRecentPosts() {
   if (INCLUDE_REPOSTS.toLowerCase() !== "true") {
     posts = posts.filter(post => !post.repost);
   }
-
-  console.log(
-    `Classified ${posts.filter(post => post.reply).length} repl${posts.filter(post => post.reply).length === 1 ? "y" : "ies"} and ${posts.filter(post => !post.reply).length} original post(s).`
-  );
 
   return posts;
 }
