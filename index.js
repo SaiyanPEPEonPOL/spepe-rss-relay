@@ -11,6 +11,7 @@ const {
   MAX_POSTS_PER_RUN = "5",
   INCLUDE_REPLIES = "false",
   INCLUDE_REPOSTS = "false",
+  MAX_REPLY_AGE_MINUTES = "30",
   TEST_ONCE = "false"
 } = process.env;
 
@@ -344,6 +345,14 @@ function itemText(post) {
   return text.length > 1400 ? text.slice(0, 1397) + "..." : text;
 }
 
+function isStaleReply(post) {
+  if (!post.reply) return false;
+  const ageLimitMs = Number(MAX_REPLY_AGE_MINUTES) * 60 * 1000;
+  if (!Number.isFinite(ageLimitMs) || ageLimitMs <= 0) return false;
+  const ts = tweetTimestampMs(post);
+  return ts > 0 && Date.now() - ts > ageLimitMs;
+}
+
 function telegramText(post) {
   const cleaned = post.text
     .replace(/https?:\/\/t\.co\/\S+/gi, "")
@@ -476,7 +485,11 @@ async function main() {
     .filter(post => {
       const unseenSomewhere = !discordSeen.has(post.id) || !telegramSeen.has(post.id);
       const newerThanObserved = !observedFloor || BigInt(post.id) > BigInt(observedFloor);
-      return unseenSomewhere && newerThanObserved;
+      const staleReply = isStaleReply(post);
+      if (staleReply) {
+        console.log(`Skipping stale reply: ${post.url}`);
+      }
+      return unseenSomewhere && newerThanObserved && !staleReply;
     })
     .sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? 1 : -1))
     .slice(0, Number(MAX_POSTS_PER_RUN));
