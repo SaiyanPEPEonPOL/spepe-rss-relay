@@ -88,11 +88,15 @@ async function sleep(ms) {
   await new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function fetchFromXmd() {
-  const url =
-    "https://x.pcstyle.dev/api/v1/profiles/" +
-    encodeURIComponent(X_HANDLE) +
-    "?format=json&limit=20";
+async function fetchFromXmdSearch() {
+  const params = new URLSearchParams({
+    q: `from:${X_HANDLE}`,
+    feed: "latest",
+    format: "json",
+    limit: "20"
+  });
+
+  const url = "https://x.pcstyle.dev/api/v1/search?" + params.toString();
 
   let response;
 
@@ -110,14 +114,14 @@ async function fetchFromXmd() {
 
     if (attempt < 3 && (response.status === 429 || response.status === 503)) {
       console.warn(
-        `x.md returned HTTP ${response.status}; retrying in ${retryAfter}s (attempt ${attempt}/3)...`
+        `x.md search returned HTTP ${response.status}; retrying in ${retryAfter}s (attempt ${attempt}/3)...`
       );
       await sleep(Math.min(Math.max(retryAfter, 5), 60) * 1000);
       continue;
     }
 
     throw new Error(
-      `x.md request failed: HTTP ${response.status}` +
+      `x.md search failed: HTTP ${response.status}` +
       (retryAfter ? ` (retry after ${retryAfter}s)` : "")
     );
   }
@@ -125,7 +129,7 @@ async function fetchFromXmd() {
   const data = await response.json();
   const rawPosts = Array.isArray(data.posts) ? data.posts : [];
 
-  const posts = rawPosts.map(tweet => {
+  return rawPosts.map(tweet => {
     const id = String(tweet.id_str || tweet.id || tweet.rest_id || "");
     const handle =
       tweet.user?.screen_name ||
@@ -152,8 +156,55 @@ async function fetchFromXmd() {
       repost: isRepost(tweet)
     };
   }).filter(post => post.id && post.url);
+}
 
-  return posts;
+async function fetchFromXmdProfile() {
+  const url =
+    "https://x.pcstyle.dev/api/v1/profiles/" +
+    encodeURIComponent(X_HANDLE) +
+    "?format=json&limit=20";
+
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": USER_AGENT,
+      "Accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`x.md profile request failed: HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  const rawPosts = Array.isArray(data.posts) ? data.posts : [];
+
+  return rawPosts.map(tweet => {
+    const id = String(tweet.id_str || tweet.id || tweet.rest_id || "");
+    const handle =
+      tweet.user?.screen_name ||
+      tweet.author?.screen_name ||
+      tweet.author?.username ||
+      X_HANDLE;
+    const text =
+      tweet.full_text ||
+      tweet.text ||
+      tweet.content ||
+      tweet.legacy?.full_text ||
+      "";
+    const url =
+      tweet.url ||
+      tweet.permalink ||
+      (id ? `https://x.com/${handle}/status/${id}` : "");
+
+    return {
+      id,
+      text,
+      url: url.startsWith("http") ? url : `https://x.com${url}`,
+      createdAt: tweet.created_at || tweet.createdAt || null,
+      reply: isReply(tweet),
+      repost: isRepost(tweet)
+    };
+  }).filter(post => post.id && post.url);
 }
 
 async function fetchFromSyndication() {
@@ -186,13 +237,19 @@ async function fetchRecentPosts() {
   let posts;
 
   try {
-    posts = await fetchFromXmd();
-    console.log(`Fetched ${posts.length} posts from x.md.`);
-  } catch (primaryError) {
-    console.warn(`Primary X source failed: ${primaryError.message}`);
-    console.warn("Trying X syndication fallback...");
-    posts = await fetchFromSyndication();
-    console.log(`Fetched ${posts.length} posts from X syndication fallback.`);
+    posts = await fetchFromXmdSearch();
+    console.log(`Fetched ${posts.length} posts from x.md live search.`);
+  } catch (searchError) {
+    console.warn(`x.md live search failed: ${searchError.message}`);
+    try {
+      posts = await fetchFromXmdProfile();
+      console.log(`Fetched ${posts.length} posts from x.md profile fallback.`);
+    } catch (profileError) {
+      console.warn(`x.md profile fallback failed: ${profileError.message}`);
+      console.warn("Trying X syndication fallback...");
+      posts = await fetchFromSyndication();
+      console.log(`Fetched ${posts.length} posts from X syndication fallback.`);
+    }
   }
 
   if (INCLUDE_REPLIES.toLowerCase() !== "true") {
