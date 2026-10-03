@@ -29,14 +29,16 @@ async function readState() {
       discordSeen: Array.isArray(state.discordSeen) ? state.discordSeen : [],
       telegramSeen: Array.isArray(state.telegramSeen) ? state.telegramSeen : [],
       initialized: Boolean(state.initialized),
-      lastRun: state.lastRun || null
+      lastRun: state.lastRun || null,
+      latestObservedId: state.latestObservedId || null
     };
   } catch {
     return {
       discordSeen: [],
       telegramSeen: [],
       initialized: false,
-      lastRun: null
+      lastRun: null,
+      latestObservedId: null
     };
   }
 }
@@ -287,6 +289,10 @@ async function main() {
     const existing = posts.slice(0, 50).map(post => post.id);
     state.discordSeen = [...existing];
     state.telegramSeen = [...existing];
+    state.latestObservedId = posts.reduce(
+      (maxId, post) => !maxId || BigInt(post.id) > BigInt(maxId) ? post.id : maxId,
+      state.latestObservedId
+    );
     state.initialized = true;
     state.lastRun = new Date().toISOString();
     await writeState(state);
@@ -306,17 +312,15 @@ async function main() {
   const discordSeen = new Set(state.discordSeen || []);
   const telegramSeen = new Set(state.telegramSeen || []);
 
-  const lastRunMs = state.lastRun ? Date.parse(state.lastRun) : Date.now();
-  const freshnessFloorMs = Number.isFinite(lastRunMs) ? lastRunMs : Date.now();
+  const observedFloor = state.latestObservedId;
 
   const newPosts = posts
     .filter(post => {
-      const postTime = tweetTimestampMs(post);
       const unseenSomewhere = !discordSeen.has(post.id) || !telegramSeen.has(post.id);
-      const actuallyNew = postTime > freshnessFloorMs;
-      return unseenSomewhere && actuallyNew;
+      const newerThanObserved = !observedFloor || BigInt(post.id) > BigInt(observedFloor);
+      return unseenSomewhere && newerThanObserved;
     })
-    .sort((a, b) => tweetTimestampMs(a) - tweetTimestampMs(b))
+    .sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? 1 : -1))
     .slice(0, Number(MAX_POSTS_PER_RUN));
 
   let deliveredAnything = false;
@@ -353,6 +357,11 @@ async function main() {
 
   state.discordSeen = Array.from(new Set(discordSeen)).slice(-100);
   state.telegramSeen = Array.from(new Set(telegramSeen)).slice(-100);
+  const maxObservedThisRun = posts.reduce(
+    (maxId, post) => !maxId || BigInt(post.id) > BigInt(maxId) ? post.id : maxId,
+    state.latestObservedId
+  );
+  state.latestObservedId = maxObservedThisRun;
   state.initialized = true;
   state.lastRun = new Date().toISOString();
   await writeState(state);
