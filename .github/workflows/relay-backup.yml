@@ -1,8 +1,6 @@
 name: SPEPE X Relay Backup
 
 on:
-  schedule:
-    - cron: "14,44 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -36,6 +34,7 @@ jobs:
           MAX_POSTS_PER_RUN: "5"
           INCLUDE_REPLIES: "false"
           INCLUDE_REPOSTS: "false"
+          MAX_REPLY_AGE_MINUTES: "30"
           TEST_ONCE: "false"
         run: node index.js
 
