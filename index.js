@@ -58,10 +58,19 @@ function extractNextData(html) {
 }
 
 function isReply(tweet) {
+  const t = tweet?.legacy || tweet || {};
   return Boolean(
-    tweet.in_reply_to_status_id_str ||
-    tweet.in_reply_to_user_id_str ||
-    tweet.in_reply_to_screen_name
+    tweet?.isReply ||
+    tweet?.is_reply ||
+    tweet?.inReplyToId ||
+    tweet?.inReplyToTweetId ||
+    tweet?.inReplyToStatusId ||
+    tweet?.inReplyToUserId ||
+    tweet?.inReplyToUsername ||
+    tweet?.reply?.in_reply_to_tweet_id ||
+    t.in_reply_to_status_id_str ||
+    t.in_reply_to_user_id_str ||
+    t.in_reply_to_screen_name
   );
 }
 
@@ -252,10 +261,6 @@ async function fetchRecentPosts() {
     }
   }
 
-  if (INCLUDE_REPLIES.toLowerCase() !== "true") {
-    posts = posts.filter(post => !post.reply);
-  }
-
   if (INCLUDE_REPOSTS.toLowerCase() !== "true") {
     posts = posts.filter(post => !post.repost);
   }
@@ -282,9 +287,8 @@ async function sendDiscord(post) {
   if (!DISCORD_WEBHOOK_URL) return;
 
   const content = [
-    "@everyone",
-    "",
-    "🐸⚡ **NEW $SPEPE TRANSMISSION**",
+    ...(post.reply ? [] : ["@everyone", ""]),
+    post.reply ? "💬 **$SPEPE REPLY**" : "🐸⚡ **NEW $SPEPE TRANSMISSION**",
     "",
     itemText(post),
     "",
@@ -297,7 +301,7 @@ async function sendDiscord(post) {
     body: JSON.stringify({
       username: RELAY_NAME,
       content,
-      allowed_mentions: { parse: ["everyone"] }
+      allowed_mentions: { parse: post.reply ? [] : ["everyone"] }
     })
   });
 
@@ -307,10 +311,10 @@ async function sendDiscord(post) {
 }
 
 async function sendTelegram(post) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return null;
 
   const text = [
-    "🐸⚡ NEW $SPEPE TRANSMISSION",
+    post.reply ? "💬 $SPEPE REPLY" : "🐸⚡ NEW $SPEPE TRANSMISSION",
     "",
     itemText(post),
     "",
@@ -328,8 +332,34 @@ async function sendTelegram(post) {
     })
   });
 
+  const payload = await response.json().catch(() => null);
+
   if (!response.ok) {
-    throw new Error(`Telegram error ${response.status}: ${await response.text()}`);
+    throw new Error(
+      `Telegram error ${response.status}: ${payload ? JSON.stringify(payload) : "unknown error"}`
+    );
+  }
+
+  return payload?.result?.message_id || null;
+}
+
+async function pinTelegramMessage(messageId) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID || !messageId) return;
+
+  const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/pinChatMessage`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: TELEGRAM_CHAT_ID,
+      message_id: messageId,
+      disable_notification: false
+    })
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    console.warn(`Telegram pin failed: HTTP ${response.status}: ${body}`);
   }
 }
 
@@ -399,13 +429,18 @@ async function main() {
 
     if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID && !telegramSeen.has(post.id)) {
       try {
-        await sendTelegram(post);
+        const telegramMessageId = await sendTelegram(post);
+        if (!post.reply && telegramMessageId) {
+          await pinTelegramMessage(telegramMessageId);
+        }
         telegramSeen.add(post.id);
         state.telegramSeen = Array.from(telegramSeen).slice(-100);
         state.lastRun = new Date().toISOString();
         await writeState(state);
         deliveredAnything = true;
-        console.log(`Telegram relayed: ${post.url}`);
+        console.log(
+          `Telegram relayed${post.reply ? " reply" : " + pin attempt"}: ${post.url}`
+        );
       } catch (err) {
         console.error(`Telegram delivery failed for ${post.url}: ${err.message}`);
       }
