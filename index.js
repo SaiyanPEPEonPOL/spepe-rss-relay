@@ -59,18 +59,52 @@ function extractNextData(html) {
 
 function isReply(tweet) {
   const t = tweet?.legacy || tweet || {};
+  const id = String(
+    tweet?.id_str ||
+    tweet?.id ||
+    tweet?.rest_id ||
+    t?.id_str ||
+    t?.id ||
+    ""
+  );
+
+  const conversationId = String(
+    tweet?.conversation_id_str ||
+    tweet?.conversation_id ||
+    tweet?.conversationId ||
+    tweet?.conversationIdStr ||
+    t?.conversation_id_str ||
+    t?.conversation_id ||
+    ""
+  );
+
+  const referenced = [
+    ...(Array.isArray(tweet?.referenced_tweets) ? tweet.referenced_tweets : []),
+    ...(Array.isArray(tweet?.referencedTweets) ? tweet.referencedTweets : [])
+  ];
+
+  const hasReplyReference = referenced.some(ref =>
+    ref?.type === "replied_to" ||
+    ref?.type === "reply" ||
+    ref?.type === "REPLIED_TO"
+  );
+
   return Boolean(
     tweet?.isReply ||
     tweet?.is_reply ||
+    tweet?.replyingTo ||
+    tweet?.reply_to ||
     tweet?.inReplyToId ||
     tweet?.inReplyToTweetId ||
     tweet?.inReplyToStatusId ||
     tweet?.inReplyToUserId ||
     tweet?.inReplyToUsername ||
     tweet?.reply?.in_reply_to_tweet_id ||
-    t.in_reply_to_status_id_str ||
-    t.in_reply_to_user_id_str ||
-    t.in_reply_to_screen_name
+    t?.in_reply_to_status_id_str ||
+    t?.in_reply_to_user_id_str ||
+    t?.in_reply_to_screen_name ||
+    hasReplyReference ||
+    (id && conversationId && conversationId !== id)
   );
 }
 
@@ -264,6 +298,10 @@ async function fetchRecentPosts() {
   if (INCLUDE_REPOSTS.toLowerCase() !== "true") {
     posts = posts.filter(post => !post.repost);
   }
+
+  console.log(
+    `Classified ${posts.filter(post => post.reply).length} repl${posts.filter(post => post.reply).length === 1 ? "y" : "ies"} and ${posts.filter(post => !post.reply).length} original post(s).`
+  );
 
   return posts;
 }
