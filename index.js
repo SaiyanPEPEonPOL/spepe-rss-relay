@@ -344,6 +344,16 @@ function itemText(post) {
   return text.length > 1400 ? text.slice(0, 1397) + "..." : text;
 }
 
+function telegramText(post) {
+  const cleaned = post.text
+    .replace(/https?:\/\/t\.co\/\S+/gi, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return cleaned.length > 1400 ? cleaned.slice(0, 1397) + "..." : cleaned;
+}
+
 async function sendDiscord(post) {
   if (!DISCORD_WEBHOOK_URL) return;
 
@@ -351,7 +361,7 @@ async function sendDiscord(post) {
     ...(post.reply ? [] : ["@everyone", ""]),
     post.reply ? "💬 **$SPEPE REPLY**" : "🐸⚡ **NEW $SPEPE TRANSMISSION**",
     "",
-    itemText(post),
+    telegramText(post),
     "",
     post.url
   ].filter(Boolean).join("\n");
