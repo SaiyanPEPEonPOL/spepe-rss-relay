@@ -137,7 +137,8 @@ async function fetchXmdSearchQuery(query) {
     q: query,
     feed: "latest",
     format: "json",
-    limit: "20"
+    limit: "20",
+    nocache: "true"
   });
 
   const url = "https://x.pcstyle.dev/api/v1/search?" + params.toString();
@@ -222,8 +223,13 @@ async function fetchFromXmdSearch() {
       reply: !originalIds.has(post.id)
     }));
 
+  const newestId = posts.reduce(
+    (maxId, post) => !maxId || BigInt(post.id) > BigInt(maxId) ? post.id : maxId,
+    null
+  );
+
   console.log(
-    `x.md live search classified ${posts.filter(post => post.reply).length} repl${posts.filter(post => post.reply).length === 1 ? "y" : "ies"} and ${posts.filter(post => !post.reply).length} original post(s).`
+    `x.md live search classified ${posts.filter(post => post.reply).length} repl${posts.filter(post => post.reply).length === 1 ? "y" : "ies"} and ${posts.filter(post => !post.reply).length} original post(s). Newest ID: ${newestId || "none"}.`
   );
 
   return posts;
