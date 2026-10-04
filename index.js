@@ -518,21 +518,27 @@ async function main() {
     }
 
     if (TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID && !telegramSeen.has(post.id)) {
-      try {
-        const telegramMessageId = await sendTelegram(post);
-        if (!post.reply && telegramMessageId) {
-          await pinTelegramMessage(telegramMessageId);
-        }
+      if (post.reply) {
         telegramSeen.add(post.id);
         state.telegramSeen = Array.from(telegramSeen).slice(-100);
         state.lastRun = new Date().toISOString();
         await writeState(state);
-        deliveredAnything = true;
-        console.log(
-          `Telegram relayed${post.reply ? " reply" : " + pin attempt"}: ${post.url}`
-        );
-      } catch (err) {
-        console.error(`Telegram delivery failed for ${post.url}: ${err.message}`);
+        console.log(`Telegram skipped reply: ${post.url}`);
+      } else {
+        try {
+          const telegramMessageId = await sendTelegram(post);
+          if (telegramMessageId) {
+            await pinTelegramMessage(telegramMessageId);
+          }
+          telegramSeen.add(post.id);
+          state.telegramSeen = Array.from(telegramSeen).slice(-100);
+          state.lastRun = new Date().toISOString();
+          await writeState(state);
+          deliveredAnything = true;
+          console.log(`Telegram relayed + pin attempt: ${post.url}`);
+        } catch (err) {
+          console.error(`Telegram delivery failed for ${post.url}: ${err.message}`);
+        }
       }
     }
   }
