@@ -55,4 +55,3 @@ async function triggerRelay(env) {
 
   return "Relay dispatched";
 }
-// relay verification touch
