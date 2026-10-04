@@ -8,7 +8,7 @@ permissions:
 
 concurrency:
   group: spepe-x-relay
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   relay:
