@@ -361,7 +361,7 @@ function isStaleReply(post) {
 
 function telegramText(post) {
   const cleaned = post.text
-    .replace(/https?:\/\/t\.co\/\S+/gi, "")
+    .replace(/https?:\/\/\S+/gi, "")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -414,7 +414,12 @@ async function sendTelegram(post) {
     body: JSON.stringify({
       chat_id: TELEGRAM_CHAT_ID,
       text,
-      disable_web_page_preview: false
+      link_preview_options: {
+        is_disabled: false,
+        url: post.url,
+        prefer_large_media: true,
+        show_above_text: false
+      }
     })
   });
 
