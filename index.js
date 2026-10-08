@@ -359,6 +359,14 @@ function isStaleReply(post) {
   return ts > 0 && Date.now() - ts > ageLimitMs;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function telegramText(post) {
   const cleaned = post.text
     .replace(/https?:\/\/\S+/gi, "")
@@ -376,7 +384,7 @@ async function sendDiscord(post) {
     ...(post.reply ? [] : ["@everyone", ""]),
     post.reply ? "💬 **$SPEPE REPLY**" : "🐸⚡ **NEW $SPEPE TRANSMISSION**",
     "",
-    telegramText(post),
+    itemText(post),
     "",
     post.url
   ].filter(Boolean).join("\n");
@@ -399,12 +407,15 @@ async function sendDiscord(post) {
 async function sendTelegram(post) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return null;
 
+  const cleanBody = telegramText(post);
+  const previewUrl = `https://fxtwitter.com/${X_HANDLE}/status/${post.id}`;
+
   const text = [
-    post.reply ? "💬 $SPEPE REPLY" : "🐸⚡ NEW $SPEPE TRANSMISSION",
+    "🐸⚡ NEW $SPEPE TRANSMISSION",
     "",
-    itemText(post),
+    escapeHtml(cleanBody),
     "",
-    post.url
+    `<a href="${escapeHtml(post.url)}">${escapeHtml(post.url)}</a><a href="${escapeHtml(previewUrl)}">&#8203;</a>`
   ].filter(Boolean).join("\n");
 
   const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -414,9 +425,10 @@ async function sendTelegram(post) {
     body: JSON.stringify({
       chat_id: TELEGRAM_CHAT_ID,
       text,
+      parse_mode: "HTML",
       link_preview_options: {
         is_disabled: false,
-        url: post.url,
+        url: previewUrl,
         prefer_large_media: true,
         show_above_text: false
       }
