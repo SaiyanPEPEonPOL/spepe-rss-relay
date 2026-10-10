@@ -404,18 +404,82 @@ async function sendDiscord(post) {
   }
 }
 
+async function fetchTelegramPreviewImage(post) {
+  const previewPage = `https://fixupx.com/${X_HANDLE}/status/${post.id}`;
+
+  try {
+    const response = await fetch(previewPage, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml"
+      },
+      redirect: "follow"
+    });
+
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const match =
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i) ||
+      html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i);
+
+    return match?.[1] ? match[1].replace(/&amp;/g, "&") : null;
+  } catch (err) {
+    console.warn(`Telegram preview image lookup failed for ${post.url}: ${err.message}`);
+    return null;
+  }
+}
+
 async function sendTelegram(post) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return null;
 
   const cleanBody = telegramText(post);
-  const previewUrl = `https://fxtwitter.com/${X_HANDLE}/status/${post.id}`;
+  const previewImage = await fetchTelegramPreviewImage(post);
 
+  if (previewImage) {
+    const captionBody =
+      cleanBody.length > 760 ? cleanBody.slice(0, 757) + "..." : cleanBody;
+
+    const caption = [
+      "🐸⚡ NEW $SPEPE TRANSMISSION",
+      "",
+      escapeHtml(captionBody),
+      "",
+      `<a href="${escapeHtml(post.url)}">View on X</a>`
+    ].filter(Boolean).join("\n");
+
+    const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        photo: previewImage,
+        caption,
+        parse_mode: "HTML"
+      })
+    });
+
+    const payload = await response.json().catch(() => null);
+
+    if (response.ok) {
+      return payload?.result?.message_id || null;
+    }
+
+    console.warn(
+      `Telegram photo preview failed for ${post.url}: ${response.status} ${payload ? JSON.stringify(payload) : ""}`
+    );
+  }
+
+  // Fallback: plain message with the real X link.
   const text = [
     "🐸⚡ NEW $SPEPE TRANSMISSION",
     "",
     escapeHtml(cleanBody),
     "",
-    `<a href="${escapeHtml(post.url)}">${escapeHtml(post.url)}</a><a href="${escapeHtml(previewUrl)}">&#8203;</a>`
+    `<a href="${escapeHtml(post.url)}">${escapeHtml(post.url)}</a>`
   ].filter(Boolean).join("\n");
 
   const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -428,7 +492,7 @@ async function sendTelegram(post) {
       parse_mode: "HTML",
       link_preview_options: {
         is_disabled: false,
-        url: previewUrl,
+        url: post.url,
         prefer_large_media: true,
         show_above_text: false
       }
