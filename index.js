@@ -12,6 +12,9 @@ const {
   INCLUDE_REPLIES = "false",
   INCLUDE_REPOSTS = "false",
   MAX_REPLY_AGE_MINUTES = "30",
+  SCHEDULER_URL,
+  SCHEDULER_ACCESS_TOKEN,
+  SCHEDULER_RUNNER_KEY,
   TEST_ONCE = "false"
 } = process.env;
 
@@ -346,8 +349,33 @@ function tweetTimestampMs(post) {
   }
 }
 
+let raidIds = new Set();
 function isRaidPost(post) {
-  return !post.reply && /(?:^|[^\p{L}\p{N}_])#SPEPERaid(?![\p{L}\p{N}_])/iu.test(post.text || "");
+  return !post.reply && raidIds.has(String(post.id));
+}
+
+async function fetchRaidIds() {
+  const configured = [SCHEDULER_URL, SCHEDULER_ACCESS_TOKEN, SCHEDULER_RUNNER_KEY].filter(Boolean).length;
+  if (!configured) {
+    console.log("Private scheduler raid connection is not configured. Sharing posts normally.");
+    return new Set();
+  }
+  if (configured !== 3) throw new Error("Configure all three SCHEDULER_* secrets before relaying posts.");
+  const target = new URL("/api/raid-tags", SCHEDULER_URL);
+  if (target.protocol !== "https:") throw new Error("The scheduler URL must use HTTPS.");
+  const response = await fetch(target, {
+    method: "POST",
+    headers: {
+      "OAI-Sites-Authorization": "Bearer " + SCHEDULER_ACCESS_TOKEN,
+      "x-runner-key": SCHEDULER_RUNNER_KEY
+    },
+    signal: AbortSignal.timeout(20000),
+    redirect: "error"
+  });
+  if (!response.ok) throw new Error("Cannot read private scheduler raid tags (HTTP " + response.status + "). No posts relayed this run.");
+  const data = await response.json();
+  if (!Array.isArray(data.raidIds) || data.raidIds.some(id => typeof id !== "string" || !/^\d+$/.test(id))) throw new Error("Invalid scheduler raid response. No posts relayed this run.");
+  return new Set(data.raidIds);
 }
 
 const RAID_CALL = "Raid this post. Leave a comment and show your support. Bring your own SPEPE energy!";
@@ -541,6 +569,7 @@ async function pinTelegramMessage(messageId) {
 
 async function main() {
   const posts = await fetchRecentPosts();
+  raidIds = await fetchRaidIds();
   const state = await readState();
 
   if (!posts.length) {
