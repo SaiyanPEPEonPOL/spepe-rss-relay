@@ -346,6 +346,12 @@ function tweetTimestampMs(post) {
   }
 }
 
+function isRaidPost(post) {
+  return !post.reply && /(?:^|[^\p{L}\p{N}_])#SPEPERaid(?![\p{L}\p{N}_])/iu.test(post.text || "");
+}
+
+const RAID_CALL = "Raid this post. Leave a comment and show your support. Bring your own SPEPE energy!";
+
 function itemText(post) {
   const text = post.text.trim();
   return text.length > 1400 ? text.slice(0, 1397) + "..." : text;
@@ -382,7 +388,8 @@ async function sendDiscord(post) {
 
   const content = [
     ...(post.reply ? [] : ["@everyone", ""]),
-    post.reply ? "💬 **$SPEPE REPLY**" : "🐸⚡ **NEW $SPEPE TRANSMISSION**",
+    post.reply ? "💬 **$SPEPE REPLY**" : isRaidPost(post) ? "🚨🐸 **$SPEPE RAID CALL**" : "🐸⚡ **NEW $SPEPE TRANSMISSION**",
+    ...(isRaidPost(post) ? ["", RAID_CALL, ""] : []),
     "",
     itemText(post),
     "",
@@ -443,7 +450,8 @@ async function sendTelegram(post) {
       cleanBody.length > 760 ? cleanBody.slice(0, 757) + "..." : cleanBody;
 
     const caption = [
-      "🐸⚡ NEW $SPEPE TRANSMISSION",
+      isRaidPost(post) ? "🚨🐸 $SPEPE RAID CALL" : "🐸⚡ NEW $SPEPE TRANSMISSION",
+      ...(isRaidPost(post) ? ["", escapeHtml(RAID_CALL), ""] : []),
       "",
       escapeHtml(captionBody),
       "",
@@ -475,7 +483,8 @@ async function sendTelegram(post) {
 
   // Fallback: plain message with the real X link.
   const text = [
-    "🐸⚡ NEW $SPEPE TRANSMISSION",
+    isRaidPost(post) ? "🚨🐸 $SPEPE RAID CALL" : "🐸⚡ NEW $SPEPE TRANSMISSION",
+      ...(isRaidPost(post) ? ["", escapeHtml(RAID_CALL), ""] : []),
     "",
     escapeHtml(cleanBody),
     "",
