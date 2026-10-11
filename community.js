@@ -102,6 +102,69 @@ async function sendText(chatId, text) {
   });
 }
 
+function parseXStatusUrl(value = "") {
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (host !== "x.com" && host !== "twitter.com") return null;
+
+    const match = url.pathname.match(/^\/([A-Za-z0-9_]+)\/status\/(\d+)/);
+    if (!match) return null;
+
+    return {
+      handle: match[1],
+      id: match[2],
+      canonicalUrl: `https://x.com/${match[1]}/status/${match[2]}`
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function verifyLinkedPost(pending, suppliedUrl) {
+  const parsed = parseXStatusUrl(suppliedUrl);
+  if (!parsed) {
+    return { ok: false, reason: "That does not look like a valid X post link." };
+  }
+
+  if (parsed.handle.toLowerCase() !== pending.handle.toLowerCase()) {
+    return {
+      ok: false,
+      reason: `That post is from @${parsed.handle}, but you are trying to link @${pending.handle}.`
+    };
+  }
+
+  const previewUrl = `https://fixupx.com/${parsed.handle}/status/${parsed.id}`;
+
+  try {
+    const response = await fetch(previewUrl, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml"
+      },
+      redirect: "follow"
+    });
+
+    if (!response.ok) {
+      return { ok: false, reason: "I could not read that X post yet. Try again in a minute." };
+    }
+
+    const html = await response.text();
+    const normalized = html.replace(/&amp;/g, "&").replace(/&#39;/g, "'");
+
+    if (!normalized.includes(pending.code)) {
+      return {
+        ok: false,
+        reason: "I found the post, but it does not contain your verification code."
+      };
+    }
+
+    return { ok: true, parsed };
+  } catch {
+    return { ok: false, reason: "I could not read that X post yet. Try again in a minute." };
+  }
+}
+
 async function processCommands(state) {
   let updates = [];
   try {
@@ -181,7 +244,11 @@ async function processCommands(state) {
           "Post this exact code from that X account:",
           code,
           "",
-          "Then come back here and use /verify.",
+          "Then come back here and use /verify followed by the link to that X post.",
+          "",
+          "Example:",
+          "/verify https://x.com/YourHandle/status/123456789",
+          "",
           "You can delete the verification post afterward. Verification posts do not earn points."
         ].join("\n")
       );
@@ -202,17 +269,19 @@ async function processCommands(state) {
         continue;
       }
 
-      const posts = await searchX(`from:${pending.handle} ${pending.code}`, 10);
-      const verified = posts.some(post =>
-        post.author.toLowerCase() === pending.handle.toLowerCase() &&
-        post.text.includes(pending.code)
-      );
-
-      if (!verified) {
+      const suppliedUrl = args[0] || "";
+      if (!suppliedUrl) {
         await sendText(
           chatId,
-          "I could not find the verification post yet. X search can lag a little. Leave the post up and try /verify again in a few minutes."
+          "Use /verify followed by the X post link that contains your verification code.\n\nExample:\n/verify https://x.com/YourHandle/status/123456789"
         );
+        continue;
+      }
+
+      const result = await verifyLinkedPost(pending, suppliedUrl);
+
+      if (!result.ok) {
+        await sendText(chatId, result.reason);
         continue;
       }
 
@@ -581,7 +650,7 @@ async function setBotCommands() {
       commands: [
         { command: "start", description: "Open SPEPE community tools" },
         { command: "link", description: "Link your X account" },
-        { command: "verify", description: "Verify your linked X account" },
+        { command: "verify", description: "Verify with your X post link" },
         { command: "rank", description: "See your community rank" },
         { command: "top", description: "See the Top 10" },
         { command: "points", description: "See how points work" }
