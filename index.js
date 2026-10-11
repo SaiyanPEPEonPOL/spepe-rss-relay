@@ -387,7 +387,11 @@ async function fetchRaidIds() {
 const RAID_CALL = "Raid this post. Leave a comment and show your support. Bring your own SPEPE energy!";
 
 function itemText(post) {
-  const text = post.text.trim();
+  const text = post.text
+    .replace(/https?:\/\/t\.co\/[^\s<>]+/gi, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   return text.length > 1400 ? text.slice(0, 1397) + "..." : text;
 }
 
@@ -428,7 +432,7 @@ async function sendDiscord(post) {
     itemText(post),
     "",
     post.url
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 
   const response = await fetch(DISCORD_WEBHOOK_URL, {
     method: "POST",
@@ -490,7 +494,7 @@ async function sendTelegram(post) {
       escapeHtml(captionBody),
       "",
       `<a href="${escapeHtml(post.url)}">View on X</a>`
-    ].filter(Boolean).join("\n");
+    ].filter(Boolean).join("\n\n");
 
     const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
     const response = await fetch(endpoint, {
@@ -523,7 +527,7 @@ async function sendTelegram(post) {
     escapeHtml(cleanBody),
     "",
     `<a href="${escapeHtml(post.url)}">${escapeHtml(post.url)}</a>`
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 
   const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   const response = await fetch(endpoint, {
