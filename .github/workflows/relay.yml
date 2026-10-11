@@ -2,15 +2,6 @@ name: SPEPE X Relay
 
 on:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "Run mode"
-        required: false
-        default: "full"
-        type: choice
-        options:
-          - full
-          - commands
 
 permissions:
   contents: write
@@ -33,7 +24,6 @@ jobs:
           node-version: "20"
 
       - name: Check X and relay new posts
-        if: ${{ inputs.mode != 'commands' }}
         env:
           X_HANDLE: "SaiyanPEPE"
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -48,23 +38,14 @@ jobs:
           TEST_ONCE: "false"
         run: node index.js
 
-      - name: Update Telegram community
-        env:
-          X_HANDLE: "SaiyanPEPE"
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          COMMUNITY_STATE_FILE: "community-state.json"
-          COMMUNITY_MODE: ${{ inputs.mode || 'full' }}
-        run: node community.js
-
-      - name: Save relay and community state
+      - name: Save relay state
         run: |
-          if [ -z "$(git status --porcelain -- state.json community-state.json)" ]; then
+          if git diff --quiet -- state.json; then
             echo "No state changes."
             exit 0
           fi
           git config user.name "spepe-relay-bot"
           git config user.email "spepe-relay-bot@users.noreply.github.com"
-          git add state.json community-state.json
+          git add state.json
           git commit -m "chore: update relay state"
           git push
