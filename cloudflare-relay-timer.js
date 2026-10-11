@@ -1,6 +1,8 @@
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(triggerRelay(env));
+    const minute = new Date(event.scheduledTime).getUTCMinutes();
+    const mode = minute % 5 === 0 ? "full" : "commands";
+    ctx.waitUntil(triggerRelay(env, mode));
   },
 
   async fetch(request, env) {
@@ -20,7 +22,7 @@ export default {
         return new Response("Unauthorized", { status: 401 });
       }
 
-      const result = await triggerRelay(env);
+      const result = await triggerRelay(env, "full");
       return new Response(result, { status: 200 });
     }
 
@@ -28,7 +30,7 @@ export default {
   }
 };
 
-async function triggerRelay(env) {
+async function triggerRelay(env, mode = "full") {
   if (!env.GITHUB_TOKEN) {
     throw new Error("Missing GITHUB_TOKEN secret");
   }
@@ -45,7 +47,10 @@ async function triggerRelay(env) {
       "User-Agent": "spepe-relay-cloudflare-timer",
       "X-GitHub-Api-Version": "2022-11-28"
     },
-    body: JSON.stringify({ ref: "main" })
+    body: JSON.stringify({
+      ref: "main",
+      inputs: { mode }
+    })
   });
 
   if (!response.ok) {
@@ -53,5 +58,5 @@ async function triggerRelay(env) {
     throw new Error(`GitHub dispatch failed: ${response.status} ${body}`);
   }
 
-  return "Relay dispatched";
+  return `Relay dispatched in ${mode} mode`;
 }
