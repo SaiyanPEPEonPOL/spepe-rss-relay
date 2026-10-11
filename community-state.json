@@ -1,7 +1,13 @@
 {
-  "telegramOffset": 267441349,
+  "telegramOffset": 267441354,
   "links": {},
-  "pendingLinks": {},
+  "pendingLinks": {
+    "283799261": {
+      "handle": "kungfukenn_eth",
+      "code": "SPEPE-LINK-UYXWJB",
+      "createdAt": "2026-10-11T19:54:44.857Z"
+    }
+  },
   "scores": {},
   "seenActivity": [
     "2106867460364497374",
