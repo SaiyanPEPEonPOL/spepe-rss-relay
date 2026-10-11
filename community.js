@@ -419,20 +419,17 @@ async function announceActivity(post, activity) {
 async function processCommunityActivity(state) {
   const candidates = new Map();
 
-  const [replies, mentionsTicker, mentionsHandle, quoteSearch, spepePosts] = await Promise.all([
+  const [replies, mentions, quoteSearch] = await Promise.all([
     searchX(`to:${X_HANDLE}`, 30),
-    searchX("$SPEPE", 30),
-    searchX(`@${X_HANDLE}`, 30),
-    searchX(`url:x.com/${X_HANDLE}/status`, 30),
-    searchX(`from:${X_HANDLE}`, 30)
+    searchX(`$SPEPE OR @${X_HANDLE}`, 30),
+    searchX(`url:x.com/${X_HANDLE}/status`, 30)
   ]);
 
   mergeCandidates(candidates, replies, "reply");
-  mergeCandidates(candidates, mentionsTicker, "mention");
-  mergeCandidates(candidates, mentionsHandle, "mention");
+  mergeCandidates(candidates, mentions, "mention");
   mergeCandidates(candidates, quoteSearch, "quote");
 
-  const recentSpepeIds = new Set(spepePosts.map(post => post.id));
+  const recentSpepeIds = new Set();
   const current = [...candidates.values()]
     .filter(post => classifyActivity(post, recentSpepeIds))
     .sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? 1 : -1));
