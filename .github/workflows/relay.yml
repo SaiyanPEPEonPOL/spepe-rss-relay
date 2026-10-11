@@ -1,8 +1,6 @@
 name: SPEPE X Relay
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
