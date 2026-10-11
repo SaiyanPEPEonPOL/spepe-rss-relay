@@ -4,7 +4,8 @@ const {
   X_HANDLE = "SaiyanPEPE",
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
-  COMMUNITY_STATE_FILE = "community-state.json"
+  COMMUNITY_STATE_FILE = "community-state.json",
+  COMMUNITY_MODE = "full"
 } = process.env;
 
 if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
@@ -667,16 +668,20 @@ async function main() {
   await setBotCommands();
   await processCommands(state);
 
-  try {
-    await processCommunityActivity(state);
-  } catch (err) {
-    console.warn(`Community activity scan failed: ${err.message}`);
-  }
+  if (COMMUNITY_MODE !== "commands") {
+    try {
+      await processCommunityActivity(state);
+    } catch (err) {
+      console.warn(`Community activity scan failed: ${err.message}`);
+    }
 
-  try {
-    await maybeSendDailyPromo(state);
-  } catch (err) {
-    console.warn(`Daily promo failed: ${err.message}`);
+    try {
+      await maybeSendDailyPromo(state);
+    } catch (err) {
+      console.warn(`Daily promo failed: ${err.message}`);
+    }
+  } else {
+    console.log("Command-only Telegram run completed.");
   }
 
   await writeState(state);
