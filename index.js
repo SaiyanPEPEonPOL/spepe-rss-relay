@@ -361,18 +361,24 @@ async function fetchRaidIds() {
     return new Set();
   }
   if (configured !== 3) throw new Error("Configure all three SCHEDULER_* secrets before relaying posts.");
-  const target = new URL("/api/raid-tags", SCHEDULER_URL);
+  const target = new URL("/api/raid-tags", SCHEDULER_URL.trim());
   if (target.protocol !== "https:") throw new Error("The scheduler URL must use HTTPS.");
   const response = await fetch(target, {
     method: "POST",
     headers: {
-      "OAI-Sites-Authorization": "Bearer " + SCHEDULER_ACCESS_TOKEN,
-      "x-runner-key": SCHEDULER_RUNNER_KEY
+      "OAI-Sites-Authorization": "Bearer " + SCHEDULER_ACCESS_TOKEN.trim(),
+      "x-runner-key": SCHEDULER_RUNNER_KEY.trim()
     },
     signal: AbortSignal.timeout(20000),
     redirect: "error"
   });
-  if (!response.ok) throw new Error("Cannot read private scheduler raid tags (HTTP " + response.status + "). No posts relayed this run.");
+  if (!response.ok) {
+    const body = await response.text();
+    const hint = response.status === 401
+      ? (body.trim() === "Unauthorized" ? "SCHEDULER_RUNNER_KEY was rejected. Copy RUNNER_KEY from the scheduler timer configuration." : "Scheduler site access was rejected. Recopy SITES_ACCESS_TOKEN into SCHEDULER_ACCESS_TOKEN and verify SCHEDULER_URL.")
+      : "Check the scheduler connection.";
+    throw new Error("Cannot read private scheduler raid tags (HTTP " + response.status + "). " + hint + " No posts relayed this run.");
+  }
   const data = await response.json();
   if (!Array.isArray(data.raidIds) || data.raidIds.some(id => typeof id !== "string" || !/^\d+$/.test(id))) throw new Error("Invalid scheduler raid response. No posts relayed this run.");
   return new Set(data.raidIds);
