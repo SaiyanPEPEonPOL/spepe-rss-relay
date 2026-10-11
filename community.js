@@ -129,6 +129,26 @@ async function processCommands(state) {
     const command = rawCommand.toLowerCase().split("@")[0];
     const telegramId = String(from.id);
 
+    if (command === "/start") {
+      await sendText(
+        chatId,
+        [
+          "🐸 SPEPE Community Support",
+          "",
+          "Link your X account with:",
+          "/link @YourXHandle",
+          "",
+          "Then follow the verification steps I give you.",
+          "",
+          "After you're linked:",
+          "/rank — see your rank",
+          "/top — see the Top 10",
+          "/points — see how points work"
+        ].join("\n")
+      );
+      continue;
+    }
+
     if (command === "/link") {
       const handle = cleanHandle(args[0] || "");
       if (!handle) {
@@ -509,23 +529,47 @@ async function maybeSendDailyPromo(state) {
   if (state.lastPromoDate === now.dateKey) return;
   if (now.hour !== 11 || now.minute < 25 || now.minute > 45) return;
 
-  await sendText(
-    TELEGRAM_CHAT_ID,
-    [
-      "⚡ WANT TO SUPPORT THE COMMUNITY? PROVE IT.",
-      "",
-      "Reply. Quote. Post.",
-      "",
-      "1 pt — reply to @SaiyanPEPE",
-      "2 pts — quote a SaiyanPEPE post",
-      "3 pts — make an original post mentioning $SPEPE or @SaiyanPEPE",
-      "",
-      "Use /rank to see where you stand.",
-      "Use /top to see the community Top 10.",
-      "",
-      "Don't forget to /link your X account to start showing support today!"
-    ].join("\n")
-  );
+  let botUsername = "";
+  try {
+    const me = await tg("getMe");
+    botUsername = me?.username || "";
+  } catch (err) {
+    console.warn(`Could not read bot username for promo button: ${err.message}`);
+  }
+
+  const body = [
+    "⚡ WANT TO SUPPORT THE COMMUNITY? PROVE IT.",
+    "",
+    "Reply. Quote. Post.",
+    "",
+    "1 pt — reply to @SaiyanPEPE",
+    "2 pts — quote a SaiyanPEPE post",
+    "3 pts — make an original post mentioning $SPEPE or @SaiyanPEPE",
+    "",
+    "Use /rank to see where you stand.",
+    "Use /top to see the community Top 10.",
+    "",
+    "Don't forget to link your X account to start showing support today!"
+  ].join("\n");
+
+  const payload = {
+    chat_id: TELEGRAM_CHAT_ID,
+    text: body,
+    disable_web_page_preview: true
+  };
+
+  if (botUsername) {
+    payload.reply_markup = {
+      inline_keyboard: [[
+        {
+          text: "🔗 Link X Account",
+          url: `https://t.me/${botUsername}?start=link`
+        }
+      ]]
+    };
+  }
+
+  await tg("sendMessage", payload);
 
   state.lastPromoDate = now.dateKey;
   console.log("Sent daily SPEPE community leaderboard promo.");
@@ -535,6 +579,7 @@ async function setBotCommands() {
   try {
     await tg("setMyCommands", {
       commands: [
+        { command: "start", description: "Open SPEPE community tools" },
         { command: "link", description: "Link your X account" },
         { command: "verify", description: "Verify your linked X account" },
         { command: "rank", description: "See your community rank" },
