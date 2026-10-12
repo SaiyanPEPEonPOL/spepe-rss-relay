@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 const {
   X_HANDLE = "SaiyanPEPE",
   DISCORD_WEBHOOK_URL,
+  DISCORD_REPLIES_WEBHOOK_URL,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
   RELAY_NAME = "SPEPE Relay",
@@ -422,7 +423,14 @@ function telegramText(post) {
 }
 
 async function sendDiscord(post) {
-  if (!DISCORD_WEBHOOK_URL) return;
+  const webhookUrl = post.reply ? DISCORD_REPLIES_WEBHOOK_URL : DISCORD_WEBHOOK_URL;
+
+  if (!webhookUrl) {
+    if (post.reply) {
+      console.warn(`Discord reply skipped because DISCORD_REPLIES_WEBHOOK_URL is not configured: ${post.url}`);
+    }
+    return;
+  }
 
   const content = [
     ...(post.reply ? [] : ["@everyone", ""]),
@@ -434,7 +442,7 @@ async function sendDiscord(post) {
     post.url
   ].filter(Boolean).join("\n\n");
 
-  const response = await fetch(DISCORD_WEBHOOK_URL, {
+  const response = await fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
