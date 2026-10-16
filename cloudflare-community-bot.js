@@ -14,6 +14,19 @@ export default {
       return new Response("SPEPE community webhook alive", { status: 200 });
     }
 
+    if (url.pathname === "/dispatch-test" && request.method === "POST") {
+      if (!env.TRIGGER_SECRET || request.headers.get("authorization") !== `Bearer ${env.TRIGGER_SECRET}`) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+
+      try {
+        await dispatch(env, "command", "");
+        return new Response("GitHub community workflow dispatch succeeded", { status: 200 });
+      } catch (err) {
+        return new Response(`GitHub dispatch failed: ${err.message}`, { status: 500 });
+      }
+    }
+
     if (url.pathname === "/webhook-status" && request.method === "POST") {
       if (!env.TRIGGER_SECRET || request.headers.get("authorization") !== `Bearer ${env.TRIGGER_SECRET}`) {
         return new Response("Unauthorized", { status: 401 });
