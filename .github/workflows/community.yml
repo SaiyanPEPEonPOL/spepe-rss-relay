@@ -1,0 +1,56 @@
+name: SPEPE Community
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "command or scan"
+        required: true
+        default: "scan"
+        type: choice
+        options:
+          - scan
+          - command
+      telegram_update:
+        description: "Telegram update JSON"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: spepe-community
+  cancel-in-progress: false
+
+jobs:
+  community:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run community service
+        env:
+          X_HANDLE: "SaiyanPEPE"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          COMMUNITY_STATE_FILE: "community-state.json"
+          COMMUNITY_MODE: ${{ inputs.mode }}
+          TELEGRAM_UPDATE_JSON: ${{ inputs.telegram_update }}
+        run: node community.js
+
+      - name: Save community state
+        run: |
+          if [ -z "$(git status --porcelain -- community-state.json)" ]; then
+            echo "No community state changes."
+            exit 0
+          fi
+          git config user.name "spepe-community-bot"
+          git config user.email "spepe-community-bot@users.noreply.github.com"
+          git add community-state.json
+          git commit -m "chore: update community state"
+          git push
