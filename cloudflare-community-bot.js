@@ -1,9 +1,39 @@
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
       return new Response("SPEPE community webhook alive", { status: 200 });
+    }
+
+    if (url.pathname === "/register" && request.method === "POST") {
+      if (!env.TRIGGER_SECRET || request.headers.get("authorization") !== `Bearer ${env.TRIGGER_SECRET}`) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) {
+        return new Response("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_WEBHOOK_SECRET", { status: 500 });
+      }
+
+      const webhookUrl = `${url.origin}/telegram`;
+      const response = await fetch(
+        `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: webhookUrl,
+            secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+            allowed_updates: ["message"],
+            drop_pending_updates: false
+          })
+        }
+      );
+
+      const body = await response.text();
+      return new Response(body, {
+        status: response.ok ? 200 : response.status,
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
     if (url.pathname !== "/telegram" || request.method !== "POST") {
@@ -18,7 +48,7 @@ export default {
     }
 
     const update = await request.json();
-    ctxSafeDispatch(env, "command", JSON.stringify(update));
+    ctx.waitUntil(dispatch(env, "command", JSON.stringify(update)));
     return new Response("OK", { status: 200 });
   },
 
@@ -26,12 +56,6 @@ export default {
     ctx.waitUntil(dispatch(env, "scan", ""));
   }
 };
-
-function ctxSafeDispatch(env, mode, update) {
-  return dispatch(env, mode, update).catch(err => {
-    console.error(err);
-  });
-}
 
 async function dispatch(env, mode, telegramUpdate) {
   if (!env.GITHUB_TOKEN) throw new Error("Missing GITHUB_TOKEN");
