@@ -73,6 +73,14 @@ async function sendText(chatId, text, extra = {}) {
   });
 }
 
+function escapeHtml(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function cleanHandle(v = "") {
   return v.trim().replace(/^@/, "").replace(/[^A-Za-z0-9_]/g, "");
 }
@@ -506,18 +514,21 @@ async function handleCommand(state, update) {
     };
 
     await sendText(chat.id, [
-      `Linking @${handle}.`,
+      `Linking @${escapeHtml(handle)}.`,
       "",
       "Post this exact code on X in either:",
       "• a reply to @SaiyanPEPE, or",
       "• an original post that mentions @SaiyanPEPE",
       "",
-      code,
+      `<pre>${escapeHtml(code)}</pre>`,
+      "Tap the code block above to copy it.",
       "",
       "That's it. You do NOT need to send me the X link.",
       "The regular SPEPE activity scan will detect your code and link the account automatically.",
+      "",
+      "⏳ Verification is checked about every 5 minutes, so please allow at least 5 minutes for it to register.",
       "Verification posts do not earn points."
-    ].join("\n"));
+    ].join("\n"), { parse_mode: "HTML" });
     return;
   }
 
