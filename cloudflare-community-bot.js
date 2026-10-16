@@ -1,3 +1,11 @@
+function safeWebhookSecret(value = "") {
+  return String(value)
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .slice(0, 256);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -14,6 +22,11 @@ export default {
         return new Response("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_WEBHOOK_SECRET", { status: 500 });
       }
 
+      const telegramWebhookSecret = safeWebhookSecret(env.TELEGRAM_WEBHOOK_SECRET);
+      if (!telegramWebhookSecret) {
+        return new Response("TELEGRAM_WEBHOOK_SECRET is empty after sanitizing", { status: 500 });
+      }
+
       const webhookUrl = `${url.origin}/telegram`;
       const response = await fetch(
         `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook`,
@@ -22,7 +35,7 @@ export default {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             url: webhookUrl,
-            secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+            secret_token: telegramWebhookSecret,
             allowed_updates: ["message"],
             drop_pending_updates: false
           })
@@ -42,7 +55,8 @@ export default {
 
     if (env.TELEGRAM_WEBHOOK_SECRET) {
       const supplied = request.headers.get("x-telegram-bot-api-secret-token");
-      if (supplied !== env.TELEGRAM_WEBHOOK_SECRET) {
+      const expected = safeWebhookSecret(env.TELEGRAM_WEBHOOK_SECRET);
+      if (supplied !== expected) {
         return new Response("Unauthorized", { status: 401 });
       }
     }
