@@ -1,6 +1,12 @@
 {
   "links": {},
-  "pendingLinks": {},
+  "pendingLinks": {
+    "283799261": {
+      "handle": "kungfukenn_eth",
+      "code": "SPEPE-LINK-7AU9NR",
+      "createdAt": "2026-10-16T21:17:19.634Z"
+    }
+  },
   "activities": [],
   "seen": [
     "2109427847714709965",
