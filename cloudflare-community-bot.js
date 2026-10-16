@@ -14,6 +14,24 @@ export default {
       return new Response("SPEPE community webhook alive", { status: 200 });
     }
 
+    if (url.pathname === "/webhook-status" && request.method === "POST") {
+      if (!env.TRIGGER_SECRET || request.headers.get("authorization") !== `Bearer ${env.TRIGGER_SECRET}`) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      if (!env.TELEGRAM_BOT_TOKEN) {
+        return new Response("Missing TELEGRAM_BOT_TOKEN", { status: 500 });
+      }
+
+      const response = await fetch(
+        `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getWebhookInfo`
+      );
+      const body = await response.text();
+      return new Response(body, {
+        status: response.ok ? 200 : response.status,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     if (url.pathname === "/register" && request.method === "POST") {
       if (!env.TRIGGER_SECRET || request.headers.get("authorization") !== `Bearer ${env.TRIGGER_SECRET}`) {
         return new Response("Unauthorized", { status: 401 });
