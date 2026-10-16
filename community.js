@@ -1,0 +1,564 @@
+import fs from "node:fs/promises";
+
+const {
+  X_HANDLE = "SaiyanPEPE",
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_CHAT_ID,
+  COMMUNITY_STATE_FILE = "community-state.json",
+  COMMUNITY_MODE = "scan",
+  TELEGRAM_UPDATE_JSON = ""
+} = process.env;
+
+if (!TELEGRAM_BOT_TOKEN) throw new Error("Missing TELEGRAM_BOT_TOKEN.");
+
+const API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+const POINTS = { reply: 1, quote: 2, mention: 3 };
+const DAILY_CAPS = { reply: 5, quote: 4, mention: 3 };
+const MILESTONES = [25, 50, 100, 250, 500, 1000];
+
+async function readState() {
+  try {
+    const s = JSON.parse(await fs.readFile(COMMUNITY_STATE_FILE, "utf8"));
+    return {
+      links: s.links || {},
+      pendingLinks: s.pendingLinks || {},
+      activities: Array.isArray(s.activities) ? s.activities : [],
+      seen: Array.isArray(s.seen) ? s.seen : [],
+      initialized: Boolean(s.initialized),
+      badges: s.badges || {},
+      milestoneSeen: s.milestoneSeen || {},
+      lastPromoDate: s.lastPromoDate || null,
+      lastWeeklyRecapKey: s.lastWeeklyRecapKey || null
+    };
+  } catch {
+    return {
+      links: {},
+      pendingLinks: {},
+      activities: [],
+      seen: [],
+      initialized: false,
+      badges: {},
+      milestoneSeen: {},
+      lastPromoDate: null,
+      lastWeeklyRecapKey: null
+    };
+  }
+}
+
+async function writeState(state) {
+  await fs.writeFile(COMMUNITY_STATE_FILE, JSON.stringify(state, null, 2) + "\n");
+}
+
+async function tg(method, body) {
+  const r = await fetch(`${API}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const p = await r.json().catch(() => null);
+  if (!r.ok || !p?.ok) throw new Error(`Telegram ${method} failed: ${r.status} ${JSON.stringify(p)}`);
+  return p.result;
+}
+
+async function sendText(chatId, text, extra = {}) {
+  return tg("sendMessage", {
+    chat_id: chatId,
+    text,
+    disable_web_page_preview: true,
+    ...extra
+  });
+}
+
+function cleanHandle(v = "") {
+  return v.trim().replace(/^@/, "").replace(/[^A-Za-z0-9_]/g, "");
+}
+
+function randomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "SPEPE-LINK-";
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function nowChicagoParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", weekday: "short",
+    hour12: false
+  }).formatToParts(date);
+  return Object.fromEntries(parts.map(p => [p.type, p.value]));
+}
+
+function localDateKey(date = new Date()) {
+  const p = nowChicagoParts(date);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function weekStartKey(date = new Date()) {
+  const d = new Date(date);
+  const p = nowChicagoParts(d);
+  const local = new Date(`${p.year}-${p.month}-${p.day}T12:00:00Z`);
+  const day = local.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  local.setUTCDate(local.getUTCDate() + diff);
+  return localDateKey(local);
+}
+
+function monthKey(date = new Date()) {
+  const p = nowChicagoParts(date);
+  return `${p.year}-${p.month}`;
+}
+
+function activityDate(a) {
+  return new Date(a.at);
+}
+
+function periodScore(state, telegramId, period) {
+  const now = new Date();
+  return state.activities
+    .filter(a => a.telegramId === telegramId)
+    .filter(a => {
+      if (period === "all") return true;
+      const d = activityDate(a);
+      if (period === "weekly") return weekStartKey(d) === weekStartKey(now);
+      if (period === "monthly") return monthKey(d) === monthKey(now);
+      return true;
+    })
+    .reduce((n, a) => n + Number(a.points || 0), 0);
+}
+
+function rows(state, period = "all") {
+  return Object.entries(state.links)
+    .map(([telegramId, link]) => ({
+      telegramId,
+      handle: link.handle,
+      score: periodScore(state, telegramId, period)
+    }))
+    .sort((a, b) => b.score - a.score || a.handle.localeCompare(b.handle));
+}
+
+function activeDates(state, telegramId) {
+  return [...new Set(
+    state.activities
+      .filter(a => a.telegramId === telegramId)
+      .map(a => localDateKey(new Date(a.at)))
+  )].sort();
+}
+
+function streakInfo(state, telegramId) {
+  const dates = activeDates(state, telegramId);
+  if (!dates.length) return { current: 0, longest: 0 };
+
+  let longest = 1;
+  let run = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const a = new Date(dates[i - 1] + "T12:00:00Z");
+    const b = new Date(dates[i] + "T12:00:00Z");
+    const diff = Math.round((b - a) / 86400000);
+    if (diff === 1) run++;
+    else run = 1;
+    longest = Math.max(longest, run);
+  }
+
+  const today = localDateKey();
+  const y = new Date();
+  y.setUTCDate(y.getUTCDate() - 1);
+  const yesterday = localDateKey(y);
+  let current = 0;
+  if (dates.at(-1) === today || dates.at(-1) === yesterday) {
+    current = 1;
+    for (let i = dates.length - 1; i > 0; i--) {
+      const a = new Date(dates[i - 1] + "T12:00:00Z");
+      const b = new Date(dates[i] + "T12:00:00Z");
+      if (Math.round((b - a) / 86400000) === 1) current++;
+      else break;
+    }
+  }
+  return { current, longest };
+}
+
+function earnedBadges(state, telegramId) {
+  const acts = state.activities.filter(a => a.telegramId === telegramId);
+  const replies = acts.filter(a => a.type === "reply").length;
+  const quotes = acts.filter(a => a.type === "quote").length;
+  const mentions = acts.filter(a => a.type === "mention").length;
+  const total = acts.reduce((n, a) => n + a.points, 0);
+  const streak = streakInfo(state, telegramId).longest;
+  const badges = [];
+  if (replies >= 25) badges.push("Frontliner");
+  if (quotes >= 10) badges.push("Signal Booster");
+  if (mentions >= 10) badges.push("SPEPE Herald");
+  if (streak >= 7) badges.push("7-Day Streak");
+  if (total >= 250) badges.push("Super Saiyan Supporter");
+  if (total >= 1000) badges.push("Legendary Supporter");
+  return badges;
+}
+
+function countToday(state, telegramId, type) {
+  const today = localDateKey();
+  return state.activities.filter(a =>
+    a.telegramId === telegramId &&
+    a.type === type &&
+    localDateKey(new Date(a.at)) === today
+  ).length;
+}
+
+async function searchX(query, limit = 30) {
+  const params = new URLSearchParams({
+    q: query, feed: "latest", format: "json",
+    limit: String(limit), nocache: "true"
+  });
+  const r = await fetch("https://x.pcstyle.dev/api/v1/search?" + params, {
+    headers: { "User-Agent": USER_AGENT, "Accept": "application/json" }
+  });
+  if (!r.ok) throw new Error(`x.md search failed: ${r.status}`);
+  const data = await r.json();
+  return (Array.isArray(data.posts) ? data.posts : []).map(t => {
+    const id = String(t.id_str || t.id || t.rest_id || "");
+    const author = t.user?.screen_name || t.author?.screen_name || t.author?.username || "";
+    const text = t.full_text || t.text || t.content || t.legacy?.full_text || "";
+    const url = t.url || t.permalink || (id && author ? `https://x.com/${author}/status/${id}` : "");
+    return {
+      id, author, text,
+      url: url.startsWith("http") ? url : `https://x.com${url}`,
+      reply: Boolean(
+        t.in_reply_to_status_id_str || t.inReplyToId || t.replyingTo ||
+        t.legacy?.in_reply_to_status_id_str
+      ),
+      quote: Boolean(
+        t.quoted_status_id_str || t.quotedStatusId ||
+        t.quoted_status || t.quotedTweet || t.quote
+      )
+    };
+  }).filter(p => p.id && p.author && p.url);
+}
+
+function linkedIdByHandle(state, handle) {
+  const h = handle.toLowerCase();
+  return Object.entries(state.links)
+    .find(([, link]) => String(link.handle).toLowerCase() === h)?.[0] || null;
+}
+
+function classify(post) {
+  if (/SPEPE-LINK-[A-Z0-9]+/i.test(post.text)) return "verification";
+  if (post.quote || /https?:\/\/(?:www\.)?x\.com\/SaiyanPEPE\/status\//i.test(post.text)) return "quote";
+  if (post.reply) return "reply";
+  if (/\$SPEPE\b|@SaiyanPEPE\b/i.test(post.text)) return "mention";
+  return null;
+}
+
+async function handleVerification(state, post) {
+  const matches = Object.entries(state.pendingLinks).filter(([, p]) =>
+    p.handle.toLowerCase() === post.author.toLowerCase() &&
+    post.text.includes(p.code)
+  );
+
+  for (const [telegramId, pending] of matches) {
+    state.links[telegramId] = {
+      handle: pending.handle,
+      linkedAt: new Date().toISOString()
+    };
+    delete state.pendingLinks[telegramId];
+
+    await sendText(telegramId, [
+      `✅ Linked @${pending.handle} successfully.`,
+      "",
+      "Your verification post did not earn points.",
+      "Use /rank to see your standing and /top weekly to see the leaderboard."
+    ].join("\n"));
+  }
+
+  return matches.length > 0;
+}
+
+async function announceCommunityPost(post, type, points) {
+  if (!TELEGRAM_CHAT_ID) return;
+  const title = type === "quote"
+    ? `🔥 COMMUNITY QUOTE +${points}`
+    : `⚡ COMMUNITY MENTION +${points}`;
+  const body = post.text.replace(/https?:\/\/\S+/gi, "").trim();
+  await sendText(TELEGRAM_CHAT_ID, [
+    title,
+    `@${post.author} is showing support.`,
+    "",
+    body.slice(0, 900),
+    "",
+    post.url
+  ].filter(Boolean).join("\n"));
+}
+
+async function maybeMilestone(state, telegramId) {
+  const total = periodScore(state, telegramId, "all");
+  const seen = new Set(state.milestoneSeen[telegramId] || []);
+  const newly = MILESTONES.filter(m => total >= m && !seen.has(m));
+  if (!newly.length) return;
+  state.milestoneSeen[telegramId] = [...seen, ...newly].sort((a,b)=>a-b);
+  const handle = state.links[telegramId]?.handle;
+  if (TELEGRAM_CHAT_ID && handle) {
+    await sendText(TELEGRAM_CHAT_ID,
+      `🏅 @${handle} just crossed ${newly.at(-1)} community support points!`
+    );
+  }
+}
+
+async function scanCommunity(state) {
+  const [replies, mentions, quotes] = await Promise.all([
+    searchX(`to:${X_HANDLE}`, 30),
+    searchX(`$SPEPE OR @${X_HANDLE}`, 30),
+    searchX(`url:x.com/${X_HANDLE}/status`, 30)
+  ]);
+
+  const map = new Map();
+  for (const [source, arr] of [["reply", replies], ["mention", mentions], ["quote", quotes]]) {
+    for (const p of arr) {
+      const existing = map.get(p.id) || { ...p, sources: new Set() };
+      existing.sources.add(source);
+      if (source === "reply") existing.reply = true;
+      if (source === "quote") existing.quote = true;
+      map.set(p.id, existing);
+    }
+  }
+
+  const current = [...map.values()]
+    .filter(p => p.author.toLowerCase() !== X_HANDLE.toLowerCase())
+    .sort((a,b) => BigInt(a.id) > BigInt(b.id) ? 1 : -1);
+
+  const seen = new Set(state.seen);
+
+  if (!state.initialized) {
+    for (const p of current) seen.add(p.id);
+    state.seen = [...seen].slice(-1500);
+    state.initialized = true;
+    console.log(`Initialized community scanner with ${current.length} existing posts.`);
+    return;
+  }
+
+  for (const post of current) {
+    if (seen.has(post.id)) continue;
+    seen.add(post.id);
+
+    if (await handleVerification(state, post)) {
+      console.log(`Verified link from @${post.author}`);
+      continue;
+    }
+
+    const type = classify(post);
+    if (!POINTS[type]) continue;
+
+    const telegramId = linkedIdByHandle(state, post.author);
+    if (!telegramId) continue;
+
+    if (countToday(state, telegramId, type) >= DAILY_CAPS[type]) {
+      console.log(`Daily ${type} cap reached for @${post.author}`);
+      continue;
+    }
+
+    const points = POINTS[type];
+    state.activities.push({
+      id: post.id,
+      telegramId,
+      handle: post.author,
+      type,
+      points,
+      url: post.url,
+      at: new Date().toISOString()
+    });
+    state.activities = state.activities.slice(-5000);
+
+    if (type === "quote" || type === "mention") {
+      try { await announceCommunityPost(post, type, points); } catch {}
+    }
+
+    await maybeMilestone(state, telegramId);
+  }
+
+  state.seen = [...seen].slice(-1500);
+}
+
+function topText(state, period) {
+  const label = period === "weekly" ? "THIS WEEK" : period === "monthly" ? "THIS MONTH" : "ALL TIME";
+  const top = rows(state, period).slice(0, 10);
+  if (!top.length) return "No ranked supporters yet.";
+  return [
+    `🏆 SPEPE TOP 10 — ${label}`,
+    "",
+    ...top.map((r, i) => `${i + 1}. @${r.handle} — ${r.score} pts`)
+  ].join("\n");
+}
+
+async function handleCommand(state, update) {
+  const message = update?.message;
+  const from = message?.from;
+  const chat = message?.chat;
+  const text = message?.text?.trim() || "";
+  if (!from?.id || !chat?.id || !text.startsWith("/")) return;
+
+  if (chat.type !== "private") {
+    await sendText(chat.id, "Community account setup works through my private DMs. Open a private chat with me.");
+    return;
+  }
+
+  const [raw, ...args] = text.split(/\s+/);
+  const cmd = raw.toLowerCase().split("@")[0];
+  const id = String(from.id);
+
+  if (cmd === "/start" || cmd === "/help") {
+    await sendText(chat.id, [
+      "🐸 SPEPE Community Support",
+      "",
+      "/link @YourXHandle — connect your X account",
+      "/rank — your weekly, monthly, and all-time rank",
+      "/top weekly — weekly Top 10",
+      "/top monthly — monthly Top 10",
+      "/top all — all-time Top 10",
+      "/badges — your earned titles",
+      "/streak — your activity streak",
+      "",
+      "Points:",
+      "Replies = 1",
+      "Quote posts = 2",
+      "Original $SPEPE/@SaiyanPEPE mentions = 3"
+    ].join("\n"));
+    return;
+  }
+
+  if (cmd === "/link") {
+    const handle = cleanHandle(args[0] || "");
+    if (!handle) return sendText(chat.id, "Use /link @YourXHandle");
+
+    const claimed = Object.entries(state.links).find(
+      ([otherId, link]) => otherId !== id && link.handle.toLowerCase() === handle.toLowerCase()
+    );
+    if (claimed) return sendText(chat.id, `@${handle} is already linked.`);
+
+    const code = randomCode();
+    state.pendingLinks[id] = {
+      handle, code, createdAt: new Date().toISOString()
+    };
+
+    await sendText(chat.id, [
+      `Linking @${handle}.`,
+      "",
+      "Post this exact code on X in either:",
+      "• a reply to @SaiyanPEPE, or",
+      "• an original post that mentions @SaiyanPEPE",
+      "",
+      code,
+      "",
+      "That's it. You do NOT need to send me the X link.",
+      "The regular SPEPE activity scan will detect your code and link the account automatically.",
+      "Verification posts do not earn points."
+    ].join("\n"));
+    return;
+  }
+
+  if (cmd === "/rank") {
+    const link = state.links[id];
+    if (!link) return sendText(chat.id, "You are not linked yet. Use /link @YourXHandle.");
+    const weekly = rows(state, "weekly").findIndex(r => r.telegramId === id) + 1;
+    const monthly = rows(state, "monthly").findIndex(r => r.telegramId === id) + 1;
+    const all = rows(state, "all").findIndex(r => r.telegramId === id) + 1;
+    await sendText(chat.id, [
+      `@${link.handle}`,
+      "",
+      `Weekly: #${weekly} — ${periodScore(state,id,"weekly")} pts`,
+      `Monthly: #${monthly} — ${periodScore(state,id,"monthly")} pts`,
+      `All-Time: #${all} — ${periodScore(state,id,"all")} pts`
+    ].join("\n"));
+    return;
+  }
+
+  if (cmd === "/top") {
+    const p = (args[0] || "weekly").toLowerCase();
+    const period = p.startsWith("month") ? "monthly" : p === "all" || p.startsWith("overall") ? "all" : "weekly";
+    return sendText(chat.id, topText(state, period));
+  }
+
+  if (cmd === "/badges") {
+    const link = state.links[id];
+    if (!link) return sendText(chat.id, "Link your X account first with /link @YourXHandle.");
+    const b = earnedBadges(state, id);
+    return sendText(chat.id, b.length ? `🏅 Your badges:\n\n${b.map(x=>"• "+x).join("\n")}` : "No badges yet. Keep supporting the community.");
+  }
+
+  if (cmd === "/streak") {
+    const link = state.links[id];
+    if (!link) return sendText(chat.id, "Link your X account first with /link @YourXHandle.");
+    const s = streakInfo(state,id);
+    return sendText(chat.id, `🔥 Current streak: ${s.current} day(s)\n🏆 Longest streak: ${s.longest} day(s)`);
+  }
+}
+
+async function maybePromo(state) {
+  if (!TELEGRAM_CHAT_ID) return;
+  const p = nowChicagoParts();
+  const date = localDateKey();
+  if (state.lastPromoDate === date) return;
+  if (Number(p.hour) !== 11 || Number(p.minute) < 25 || Number(p.minute) > 40) return;
+
+  await sendText(TELEGRAM_CHAT_ID, [
+    "⚡ WANT TO SUPPORT THE COMMUNITY? PROVE IT.",
+    "",
+    "Reply. Quote. Post.",
+    "",
+    "1 pt — reply to @SaiyanPEPE",
+    "2 pts — quote a SaiyanPEPE post",
+    "3 pts — make an original post mentioning $SPEPE or @SaiyanPEPE",
+    "",
+    "Weekly, monthly, and all-time rankings are tracked.",
+    "",
+    "DM the bot and use /link @YourXHandle to start showing support today!"
+  ].join("\n"));
+  state.lastPromoDate = date;
+}
+
+async function maybeWeeklyRecap(state) {
+  if (!TELEGRAM_CHAT_ID) return;
+  const p = nowChicagoParts();
+  if (p.weekday !== "Sun" || Number(p.hour) !== 19) return;
+  const key = weekStartKey();
+  if (state.lastWeeklyRecapKey === key) return;
+
+  const start = weekStartKey();
+  const weekActs = state.activities.filter(a => weekStartKey(new Date(a.at)) === start);
+  const replies = weekActs.filter(a=>a.type==="reply").length;
+  const quotes = weekActs.filter(a=>a.type==="quote").length;
+  const mentions = weekActs.filter(a=>a.type==="mention").length;
+
+  await sendText(TELEGRAM_CHAT_ID, [
+    "🐸 SPEPE WEEKLY COMMUNITY RECAP",
+    "",
+    `${replies} replies`,
+    `${quotes} quote posts`,
+    `${mentions} original mentions`,
+    "",
+    topText(state, "weekly")
+  ].join("\n"));
+
+  state.lastWeeklyRecapKey = key;
+}
+
+async function main() {
+  const state = await readState();
+
+  if (COMMUNITY_MODE === "command") {
+    if (!TELEGRAM_UPDATE_JSON) return;
+    await handleCommand(state, JSON.parse(TELEGRAM_UPDATE_JSON));
+  } else {
+    await scanCommunity(state);
+    await maybePromo(state);
+    await maybeWeeklyRecap(state);
+  }
+
+  await writeState(state);
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
