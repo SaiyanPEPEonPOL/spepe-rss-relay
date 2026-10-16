@@ -17,7 +17,7 @@ const USER_AGENT =
   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 const POINTS = { reply: 1, quote: 2, mention: 3 };
-const DAILY_CAPS = { reply: 5, quote: 4, mention: 3 };
+const HOURLY_CAPS = { reply: 3, quote: 3, mention: 3 };
 const MILESTONES = [25, 50, 100, 250, 500, 1000];
 
 async function readState() {
@@ -199,13 +199,31 @@ function earnedBadges(state, telegramId) {
   return badges;
 }
 
-function countToday(state, telegramId, type) {
-  const today = localDateKey();
+function countLastHour(state, telegramId, type) {
+  const floor = Date.now() - 60 * 60 * 1000;
   return state.activities.filter(a =>
     a.telegramId === telegramId &&
     a.type === type &&
-    localDateKey(new Date(a.at)) === today
+    new Date(a.at).getTime() >= floor
   ).length;
+}
+
+function hasQuoteCreditForSource(state, telegramId, sourcePostId) {
+  if (!sourcePostId) return false;
+  return state.activities.some(a =>
+    a.telegramId === telegramId &&
+    a.type === "quote" &&
+    String(a.sourcePostId || "") === String(sourcePostId)
+  );
+}
+
+function highlightedToday(state, telegramId) {
+  const today = localDateKey();
+  return state.activities.some(a =>
+    a.telegramId === telegramId &&
+    a.highlighted === true &&
+    localDateKey(new Date(a.at)) === today
+  );
 }
 
 async function searchX(query, limit = 30) {
@@ -223,16 +241,46 @@ async function searchX(query, limit = 30) {
     const author = t.user?.screen_name || t.author?.screen_name || t.author?.username || "";
     const text = t.full_text || t.text || t.content || t.legacy?.full_text || "";
     const url = t.url || t.permalink || (id && author ? `https://x.com/${author}/status/${id}` : "");
+    const replyTargetId = String(
+      t.in_reply_to_status_id_str ||
+      t.inReplyToId ||
+      t.inReplyToTweetId ||
+      t.legacy?.in_reply_to_status_id_str ||
+      ""
+    );
+
+    const quoted =
+      t.quoted_status ||
+      t.quotedStatus ||
+      t.quoted_tweet ||
+      t.quotedTweet ||
+      t.quote ||
+      null;
+
+    let quoteTargetId = String(
+      t.quoted_status_id_str ||
+      t.quotedStatusId ||
+      quoted?.id_str ||
+      quoted?.id ||
+      quoted?.rest_id ||
+      ""
+    );
+
+    if (!quoteTargetId) {
+      const match = text.match(/https?:\/\/(?:www\.)?x\.com\/SaiyanPEPE\/status\/(\d+)/i);
+      if (match) quoteTargetId = match[1];
+    }
+
     return {
       id, author, text,
       url: url.startsWith("http") ? url : `https://x.com${url}`,
+      replyTargetId,
+      quoteTargetId,
       reply: Boolean(
-        t.in_reply_to_status_id_str || t.inReplyToId || t.replyingTo ||
-        t.legacy?.in_reply_to_status_id_str
+        replyTargetId || t.replyingTo
       ),
       quote: Boolean(
-        t.quoted_status_id_str || t.quotedStatusId ||
-        t.quoted_status || t.quotedTweet || t.quote
+        quoteTargetId || quoted
       )
     };
   }).filter(p => p.id && p.author && p.url);
@@ -353,24 +401,35 @@ async function scanCommunity(state) {
     const telegramId = linkedIdByHandle(state, post.author);
     if (!telegramId) continue;
 
-    if (countToday(state, telegramId, type) >= DAILY_CAPS[type]) {
-      console.log(`Daily ${type} cap reached for @${post.author}`);
+    if (countLastHour(state, telegramId, type) >= HOURLY_CAPS[type]) {
+      console.log(`Rolling hourly ${type} cap reached for @${post.author}`);
+      continue;
+    }
+
+    if (type === "quote" && hasQuoteCreditForSource(state, telegramId, post.quoteTargetId)) {
+      console.log(`Duplicate quote source ignored for @${post.author}: ${post.quoteTargetId}`);
       continue;
     }
 
     const points = POINTS[type];
+    const shouldHighlight =
+      (type === "quote" || type === "mention") &&
+      !highlightedToday(state, telegramId);
+
     state.activities.push({
       id: post.id,
       telegramId,
       handle: post.author,
       type,
       points,
+      sourcePostId: type === "quote" ? (post.quoteTargetId || null) : (type === "reply" ? (post.replyTargetId || null) : null),
+      highlighted: shouldHighlight,
       url: post.url,
       at: new Date().toISOString()
     });
     state.activities = state.activities.slice(-5000);
 
-    if (type === "quote" || type === "mention") {
+    if (shouldHighlight) {
       try { await announceCommunityPost(post, type, points); } catch {}
     }
 
@@ -422,7 +481,12 @@ async function handleCommand(state, update) {
       "Points:",
       "Replies = 1",
       "Quote posts = 2",
-      "Original $SPEPE/@SaiyanPEPE mentions = 3"
+      "Original $SPEPE/@SaiyanPEPE mentions = 3",
+      "",
+      "Anti-spam:",
+      "Up to 3 counted replies, quotes, and mentions per rolling hour.",
+      "Only one quote per SaiyanPEPE post can earn points.",
+      "Only one community highlight per person per day."
     ].join("\n"));
     return;
   }
