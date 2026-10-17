@@ -634,31 +634,39 @@ async function raidRepliesText(state) {
   const suppressed = new Set(todaySuppressed(state).map(String));
 
   let officialReplies = [];
+  let communityReplies = [];
+
   try {
-    officialReplies = (await searchX(`from:${X_HANDLE} filter:replies`, 30))
+    const [officialFeed, communityFeed] = await Promise.all([
+      searchX(`from:${X_HANDLE} filter:replies`, 100),
+      searchX(`to:${X_HANDLE}`, 100)
+    ]);
+
+    officialReplies = officialFeed
       .filter(p => p.reply)
       .filter(p => localDateKey(snowflakeDate(p.id) || new Date(0)) === today)
       .filter(p => !suppressed.has(String(p.id)))
-      .slice(0, 20);
-  } catch {}
+      .sort((a,b) => BigInt(a.id) > BigInt(b.id) ? -1 : 1);
 
-  const communityReplies = state.activities
-    .filter(a => raidActivityEligible(a, today))
-    .filter(a => a.type === "reply")
-    .filter(a => !suppressed.has(String(a.id)))
-    .sort((a,b) => new Date(b.at) - new Date(a.at))
-    .slice(0, 30);
+    communityReplies = communityFeed
+      .filter(p => p.author.toLowerCase() !== X_HANDLE.toLowerCase())
+      .filter(p => localDateKey(snowflakeDate(p.id) || new Date(0)) === today)
+      .filter(p => !suppressed.has(String(p.id)))
+      .sort((a,b) => BigInt(a.id) > BigInt(b.id) ? -1 : 1);
+  } catch (err) {
+    console.error("Raid Replies live search failed:", err);
+  }
 
   const lines = [
     "⚡ SPEPE REPLY RAID",
     "",
-    "Keep the conversation moving. Pick a reply, add something real, and push the signal.",
+    "Fresh replies from today. This list is live and does not depend on scoring or whether a post was already seen.",
     "",
     "🔥 OFFICIAL SPEPE REPLIES"
   ];
 
   if (!officialReplies.length) {
-    lines.push("No official SPEPE replies are waiting right now.");
+    lines.push("No official SPEPE replies found today.");
   } else {
     officialReplies.forEach((p,i) => {
       lines.push(`${i + 1}) @${X_HANDLE} • Reply`);
@@ -669,11 +677,11 @@ async function raidRepliesText(state) {
   lines.push("", "⚡ COMMUNITY REPLIES");
 
   if (!communityReplies.length) {
-    lines.push("No eligible community replies are waiting right now.");
+    lines.push("No community replies found today.");
   } else {
-    communityReplies.forEach((a,i) => {
-      lines.push(`${i + 1}) @${a.handle} • Reply • +${a.points} pt`);
-      lines.push(a.url, "");
+    communityReplies.forEach((p,i) => {
+      lines.push(`${i + 1}) @${p.author} • Reply`);
+      lines.push(p.url, "");
     });
   }
 
