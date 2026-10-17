@@ -718,6 +718,16 @@ async function handleCommand(state, update) {
     if (chat.type !== "private") {
       return sendText(chat.id, "Open this with me in DM to view the reply raid list.");
     }
+
+    try {
+      if (message?.message_id) {
+        await tg("deleteMessage", {
+          chat_id: chat.id,
+          message_id: message.message_id
+        });
+      }
+    } catch {}
+
     return sendText(chat.id, await raidRepliesText(state));
   }
 
