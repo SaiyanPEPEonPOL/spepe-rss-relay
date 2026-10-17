@@ -637,13 +637,16 @@ async function raidRepliesText(state) {
   let communityReplies = [];
 
   try {
-    const [officialFeed, communityFeed] = await Promise.all([
-      searchX(`from:${X_HANDLE} filter:replies`, 100),
+    const [officialAll, officialOriginals, communityFeed] = await Promise.all([
+      searchX(`from:${X_HANDLE}`, 100),
+      searchX(`from:${X_HANDLE} -filter:replies`, 100),
       searchX(`to:${X_HANDLE}`, 100)
     ]);
 
-    officialReplies = officialFeed
-      .filter(p => p.reply)
+    const originalIds = new Set(officialOriginals.map(p => String(p.id)));
+
+    officialReplies = officialAll
+      .filter(p => !originalIds.has(String(p.id)))
       .filter(p => localDateKey(snowflakeDate(p.id) || new Date(0)) === today)
       .filter(p => !suppressed.has(String(p.id)))
       .sort((a,b) => BigInt(a.id) > BigInt(b.id) ? -1 : 1);
