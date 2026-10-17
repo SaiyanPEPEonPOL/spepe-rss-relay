@@ -160,6 +160,17 @@ function typeLabel(type) {
   return type;
 }
 
+function raidActivityEligible(a, today = localDateKey()) {
+  if (!a || !["reply", "quote", "mention"].includes(a.type)) return false;
+  const activityDay = a.raidDate || localDateKey(new Date(a.at));
+  if (activityDay !== today) return false;
+  if ((a.type === "reply" || a.type === "quote") &&
+      (!a.sourcePostId || !isWithinDaysBySnowflake(a.sourcePostId, 5))) {
+    return false;
+  }
+  return true;
+}
+
 async function isOwnerOrAdmin(userId) {
   if (!TELEGRAM_CHAT_ID) return false;
   try {
@@ -573,8 +584,7 @@ async function raidListText(state) {
   } catch {}
 
   const community = state.activities
-    .filter(a => a.raidEligible)
-    .filter(a => a.raidDate === today)
+    .filter(a => raidActivityEligible(a, today))
     .filter(a => !suppressed.has(String(a.id)))
     .sort((a,b) => Number(b.points || 0) - Number(a.points || 0) || new Date(b.at) - new Date(a.at))
     .slice(0, 20);
@@ -731,7 +741,7 @@ async function handleCommand(state, update) {
   if (cmd === "/raidclear") {
     if (!(await isOwnerOrAdmin(id))) return sendText(chat.id, "Admin only.");
     const today = localDateKey();
-    const ids = state.activities.filter(a => a.raidDate === today).map(a => String(a.id));
+    const ids = state.activities.filter(a => raidActivityEligible(a, today)).map(a => String(a.id));
     state.raidSuppressed[today] = [...new Set([...(state.raidSuppressed[today] || []), ...ids])];
     return sendText(chat.id, "🧹 Today's community Raid Board has been cleared.");
   }
@@ -743,7 +753,7 @@ async function handleCommand(state, update) {
 
     const today = localDateKey();
     const community = state.activities
-      .filter(a => a.raidEligible && a.raidDate === today)
+      .filter(a => raidActivityEligible(a, today))
       .filter(a => !(state.raidSuppressed[today] || []).includes(String(a.id)))
       .sort((a,b) => Number(b.points || 0) - Number(a.points || 0) || new Date(b.at) - new Date(a.at))
       .slice(0, 20);
