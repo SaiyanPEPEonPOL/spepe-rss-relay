@@ -80,7 +80,7 @@ export default {
           body: JSON.stringify({
             url: webhookUrl,
             secret_token: telegramWebhookSecret,
-            allowed_updates: ["message"],
+            allowed_updates: ["message", "channel_post"],
             drop_pending_updates: false
           })
         }
