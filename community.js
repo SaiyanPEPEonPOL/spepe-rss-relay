@@ -363,19 +363,34 @@ async function maybeMilestone(state, telegramId) {
 }
 
 async function scanCommunity(state) {
-  const [replies, mentions, quotes] = await Promise.all([
+  const linkedHandles = Object.values(state.links)
+    .map(link => cleanHandle(link.handle || ""))
+    .filter(Boolean);
+
+  const [replies, mentions, quoteSearch, ...linkedFeeds] = await Promise.all([
     searchX(`to:${X_HANDLE}`, 30),
     searchX(`$SPEPE OR @${X_HANDLE}`, 30),
-    searchX(`url:x.com/${X_HANDLE}/status`, 30)
+    searchX(`url:x.com/${X_HANDLE}/status`, 30),
+    ...linkedHandles.slice(0, 20).map(handle => searchX(`from:${handle}`, 20))
   ]);
 
   const map = new Map();
-  for (const [source, arr] of [["reply", replies], ["mention", mentions], ["quote", quotes]]) {
+  for (const [source, arr] of [["reply", replies], ["mention", mentions], ["quote", quoteSearch]]) {
     for (const p of arr) {
       const existing = map.get(p.id) || { ...p, sources: new Set() };
       existing.sources.add(source);
       if (source === "reply") existing.reply = true;
       if (source === "quote") existing.quote = true;
+      map.set(p.id, existing);
+    }
+  }
+
+  for (const arr of linkedFeeds) {
+    for (const p of arr) {
+      const existing = map.get(p.id) || { ...p, sources: new Set() };
+      existing.sources.add("linked-feed");
+      if (p.reply) existing.reply = true;
+      if (p.quote) existing.quote = true;
       map.set(p.id, existing);
     }
   }
