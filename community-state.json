@@ -5,7 +5,13 @@
       "linkedAt": "2026-10-16T22:11:08.779Z"
     }
   },
-  "pendingLinks": {},
+  "pendingLinks": {
+    "7304065731": {
+      "handle": "0xhilal",
+      "code": "SPEPE-LINK-YVTMTX",
+      "createdAt": "2026-10-17T17:04:29.479Z"
+    }
+  },
   "activities": [
     {
       "id": "2110756824014037452",
