@@ -625,15 +625,15 @@ function topText(state, period) {
 }
 
 async function handleCommand(state, update) {
-  const message = update?.message;
+  const message = update?.message || update?.channel_post;
   const from = message?.from;
   const chat = message?.chat;
   const text = message?.text?.trim() || "";
-  if (!from?.id || !chat?.id || !text.startsWith("/")) return;
+  if (!chat?.id || !text.startsWith("/")) return;
 
   const [raw, ...args] = text.split(/\s+/);
   const cmd = raw.toLowerCase().split("@")[0];
-  const id = String(from.id);
+  const id = from?.id ? String(from.id) : "";
 
   if (cmd === "/start" || cmd === "/help") {
     await sendText(chat.id, [
@@ -663,6 +663,7 @@ async function handleCommand(state, update) {
   }
 
   if (cmd === "/link") {
+    if (!id) return sendText(chat.id, "🔒 Account linking must be done in a private chat with the bot.");
     if (chat.type !== "private") {
       return sendText(chat.id, "🔒 Account linking happens in my DMs. Open a private chat with me and use /link @YourXHandle.");
     }
@@ -726,6 +727,7 @@ async function handleCommand(state, update) {
   }
 
   if (cmd === "/announcements") {
+    if (!id) return sendText(chat.id, "Run this admin command from your user account in a group or DM.");
     if (!(await isOwnerOrAdmin(id))) return sendText(chat.id, "Admin only.");
     const rawChoice = String(args[0] || "").toLowerCase().replace(/^top/, "");
     const n = rawChoice === "none" ? 0 : Number(rawChoice);
@@ -739,6 +741,7 @@ async function handleCommand(state, update) {
   }
 
   if (cmd === "/raidclear") {
+    if (!id) return sendText(chat.id, "Run this admin command from your user account in a group or DM.");
     if (!(await isOwnerOrAdmin(id))) return sendText(chat.id, "Admin only.");
     const today = localDateKey();
     const ids = state.activities.filter(a => raidActivityEligible(a, today)).map(a => String(a.id));
@@ -747,6 +750,7 @@ async function handleCommand(state, update) {
   }
 
   if (cmd === "/raidremove") {
+    if (!id) return sendText(chat.id, "Run this admin command from your user account in a group or DM.");
     if (!(await isOwnerOrAdmin(id))) return sendText(chat.id, "Admin only.");
     const arg = String(args[0] || "").trim();
     if (!arg) return sendText(chat.id, "Use /raidremove <community number or X post ID>.");
@@ -769,6 +773,7 @@ async function handleCommand(state, update) {
   }
 
   if (cmd === "/rank") {
+    if (!id) return sendText(chat.id, "Use /rank from a user chat or group message so I can identify your account.");
     const link = state.links[id];
     if (!link) return sendText(chat.id, "You are not linked yet. Use /link @YourXHandle.");
     const weekly = rows(state, "weekly").findIndex(r => r.telegramId === id) + 1;
@@ -791,6 +796,7 @@ async function handleCommand(state, update) {
   }
 
   if (cmd === "/badges") {
+    if (!id) return sendText(chat.id, "Use /badges from a user chat or group message so I can identify your account.");
     const link = state.links[id];
     if (!link) return sendText(chat.id, "Link your X account first with /link @YourXHandle.");
     const b = earnedBadges(state, id);
@@ -798,6 +804,7 @@ async function handleCommand(state, update) {
   }
 
   if (cmd === "/streak") {
+    if (!id) return sendText(chat.id, "Use /streak from a user chat or group message so I can identify your account.");
     const link = state.links[id];
     if (!link) return sendText(chat.id, "Link your X account first with /link @YourXHandle.");
     const s = streakInfo(state,id);
