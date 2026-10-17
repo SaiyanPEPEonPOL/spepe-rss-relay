@@ -585,6 +585,7 @@ async function raidListText(state) {
 
   const community = state.activities
     .filter(a => raidActivityEligible(a, today))
+    .filter(a => a.type !== "reply")
     .filter(a => !suppressed.has(String(a.id)))
     .sort((a,b) => Number(b.points || 0) - Number(a.points || 0) || new Date(b.at) - new Date(a.at))
     .slice(0, 20);
@@ -613,6 +614,38 @@ async function raidListText(state) {
   return lines.join("\n");
 }
 
+
+function raidRepliesText(state) {
+  const today = localDateKey();
+  const suppressed = new Set(todaySuppressed(state).map(String));
+  const replies = state.activities
+    .filter(a => raidActivityEligible(a, today))
+    .filter(a => a.type === "reply")
+    .filter(a => !suppressed.has(String(a.id)))
+    .sort((a,b) => new Date(b.at) - new Date(a.at))
+    .slice(0, 30);
+
+  const lines = [
+    "⚡ SPEPE REPLY RAID",
+    "",
+    "These are community replies tied to recent SaiyanPEPE posts.",
+    "Drop a real response, like, repost, or keep the conversation moving.",
+    ""
+  ];
+
+  if (!replies.length) {
+    lines.push("No eligible community replies are waiting right now.");
+  } else {
+    replies.forEach((a,i) => {
+      lines.push(`${i + 1}) @${a.handle} • Reply • +${a.points} pt`);
+      lines.push(a.url, "");
+    });
+  }
+
+  lines.push("Reply Raid resets daily.");
+  return lines.join("\n");
+}
+
 function topText(state, period) {
   const label = period === "weekly" ? "THIS WEEK" : period === "monthly" ? "THIS MONTH" : "ALL TIME";
   const top = rows(state, period).slice(0, 10);
@@ -635,6 +668,13 @@ async function handleCommand(state, update) {
   const cmd = raw.toLowerCase().split("@")[0];
   const id = from?.id ? String(from.id) : "";
 
+  if (cmd === "/start" && String(args[0] || "").toLowerCase() === "raidreplies") {
+    if (chat.type !== "private") {
+      return sendText(chat.id, "Open this with me in DM to view the reply raid list.");
+    }
+    return sendText(chat.id, raidRepliesText(state));
+  }
+
   if (cmd === "/start" || cmd === "/help") {
     await sendText(chat.id, [
       "🐸 SPEPE Community Support",
@@ -647,6 +687,7 @@ async function handleCommand(state, update) {
       "/badges — your earned titles",
       "/streak — your activity streak",
       "/raidlist — today's SPEPE Raid Board",
+      "/raidreplies — today's reply raid list (DM only)",
       "",
       "Points:",
       "Replies = 1",
@@ -701,6 +742,13 @@ async function handleCommand(state, update) {
   }
 
 
+  if (cmd === "/raidreplies") {
+    if (chat.type !== "private") {
+      return sendText(chat.id, "🔒 Reply raids are sent privately. Use the ⚡ Raid Replies button under /raidlist.");
+    }
+    return sendText(chat.id, raidRepliesText(state));
+  }
+
   if (cmd === "/raidlist") {
     if (chat.type !== "private") {
       const last = Number(state.raidLastPublicAt[String(chat.id)] || 0);
@@ -709,7 +757,16 @@ async function handleCommand(state, update) {
       }
       state.raidLastPublicAt[String(chat.id)] = Date.now();
     }
-    return sendText(chat.id, await raidListText(state));
+    return sendText(chat.id, await raidListText(state), {
+      reply_markup: {
+        inline_keyboard: [[
+          {
+            text: "⚡ Raid Replies",
+            url: "https://t.me/SPEPE_bot?start=raidreplies"
+          }
+        ]]
+      }
+    });
   }
 
   if (cmd === "/raidsettings") {
