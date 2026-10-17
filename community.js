@@ -565,7 +565,8 @@ async function raidListText(state) {
 
   let official = [];
   try {
-    official = (await searchX(`from:${X_HANDLE}`, 20))
+    official = (await searchX(`from:${X_HANDLE} -filter:replies`, 20))
+      .filter(p => !p.reply)
       .filter(p => localDateKey(snowflakeDate(p.id) || new Date(0)) === today)
       .filter(p => !suppressed.has(String(p.id)))
       .slice(0, 10);
