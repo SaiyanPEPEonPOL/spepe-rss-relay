@@ -265,6 +265,12 @@ async function searchX(query, limit = 30) {
       t.quote ||
       null;
 
+    const quoteTargetAuthor =
+      quoted?.user?.screen_name ||
+      quoted?.author?.screen_name ||
+      quoted?.author?.username ||
+      "";
+
     let quoteTargetId = String(
       t.quoted_status_id_str ||
       t.quotedStatusId ||
@@ -284,6 +290,7 @@ async function searchX(query, limit = 30) {
       url: url.startsWith("http") ? url : `https://x.com${url}`,
       replyTargetId,
       quoteTargetId,
+      quoteTargetAuthor,
       reply: Boolean(
         replyTargetId || t.replyingTo
       ),
@@ -300,9 +307,15 @@ function linkedIdByHandle(state, handle) {
     .find(([, link]) => String(link.handle).toLowerCase() === h)?.[0] || null;
 }
 
-function classify(post) {
+function classify(post, spepePostIds = new Set()) {
   if (/SPEPE-LINK-[A-Z0-9]+/i.test(post.text)) return "verification";
-  if (post.quote || /https?:\/\/(?:www\.)?x\.com\/SaiyanPEPE\/status\//i.test(post.text)) return "quote";
+
+  const quotesSpepe =
+    post.quoteTargetAuthor?.toLowerCase() === X_HANDLE.toLowerCase() ||
+    (post.quoteTargetId && spepePostIds.has(String(post.quoteTargetId))) ||
+    /https?:\/\/(?:www\.)?x\.com\/SaiyanPEPE\/status\//i.test(post.text);
+
+  if (quotesSpepe) return "quote";
   if (post.reply) return "reply";
   if (/\$SPEPE\b|@SaiyanPEPE\b/i.test(post.text)) return "mention";
   return null;
@@ -367,12 +380,15 @@ async function scanCommunity(state) {
     .map(link => cleanHandle(link.handle || ""))
     .filter(Boolean);
 
-  const [replies, mentions, quoteSearch, ...linkedFeeds] = await Promise.all([
+  const [replies, mentions, quoteSearch, spepePosts, ...linkedFeeds] = await Promise.all([
     searchX(`to:${X_HANDLE}`, 30),
     searchX(`$SPEPE OR @${X_HANDLE}`, 30),
     searchX(`url:x.com/${X_HANDLE}/status`, 30),
+    searchX(`from:${X_HANDLE}`, 30),
     ...linkedHandles.slice(0, 20).map(handle => searchX(`from:${handle}`, 20))
   ]);
+
+  const spepePostIds = new Set(spepePosts.map(p => String(p.id)));
 
   const map = new Map();
   for (const [source, arr] of [["reply", replies], ["mention", mentions], ["quote", quoteSearch]]) {
@@ -418,7 +434,7 @@ async function scanCommunity(state) {
       continue;
     }
 
-    const type = classify(post);
+    const type = classify(post, spepePostIds);
     if (!POINTS[type]) continue;
 
     const telegramId = linkedIdByHandle(state, post.author);
