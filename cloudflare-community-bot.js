@@ -106,8 +106,13 @@ export default {
     }
 
     const update = await request.json();
-    ctx.waitUntil(dispatch(env, "command", JSON.stringify(update)));
-    return new Response("OK", { status: 200 });
+    try {
+      await dispatch(env, "command", JSON.stringify(update));
+      return new Response("OK", { status: 200 });
+    } catch (err) {
+      console.error("Telegram command dispatch failed:", err);
+      return new Response(`Command dispatch failed: ${err.message}`, { status: 502 });
+    }
   },
 
   async scheduled(event, env, ctx) {
