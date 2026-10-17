@@ -164,8 +164,13 @@ function raidActivityEligible(a, today = localDateKey()) {
   if (!a || !["reply", "quote", "mention"].includes(a.type)) return false;
   const activityDay = a.raidDate || localDateKey(new Date(a.at));
   if (activityDay !== today) return false;
-  if ((a.type === "reply" || a.type === "quote") &&
+  if (a.type === "quote" &&
       (!a.sourcePostId || !isWithinDaysBySnowflake(a.sourcePostId, 5))) {
+    return false;
+  }
+  if (a.type === "reply" &&
+      a.sourcePostId &&
+      !isWithinDaysBySnowflake(a.sourcePostId, 5)) {
     return false;
   }
   return true;
@@ -515,8 +520,17 @@ async function scanCommunity(state) {
 
     if ((type === "reply" || type === "quote")) {
       const sourceId = type === "quote" ? post.quoteTargetId : post.replyTargetId;
-      if (!sourceId || !isWithinDaysBySnowflake(sourceId, 5)) {
-        console.log(`Old or unverifiable ${type} source ignored for @${post.author}: ${sourceId || "missing"}`);
+      const sourceConfirmedBySearch =
+        type === "reply" &&
+        post.sources?.has("reply");
+
+      if (sourceId) {
+        if (!isWithinDaysBySnowflake(sourceId, 5)) {
+          console.log(`Old ${type} source ignored for @${post.author}: ${sourceId}`);
+          continue;
+        }
+      } else if (!sourceConfirmedBySearch) {
+        console.log(`Unverifiable ${type} source ignored for @${post.author}: missing source ID`);
         continue;
       }
     }
