@@ -32,7 +32,10 @@ async function readState() {
       badges: s.badges || {},
       milestoneSeen: s.milestoneSeen || {},
       lastPromoDate: s.lastPromoDate || null,
-      lastWeeklyRecapKey: s.lastWeeklyRecapKey || null
+      lastWeeklyRecapKey: s.lastWeeklyRecapKey || null,
+      announcementTop: Number.isFinite(Number(s.announcementTop)) ? Number(s.announcementTop) : 10,
+      raidSuppressed: s.raidSuppressed || {},
+      raidLastPublicAt: s.raidLastPublicAt || {}
     };
   } catch {
     return {
@@ -44,7 +47,10 @@ async function readState() {
       badges: {},
       milestoneSeen: {},
       lastPromoDate: null,
-      lastWeeklyRecapKey: null
+      lastWeeklyRecapKey: null,
+      announcementTop: 10,
+      raidSuppressed: {},
+      raidLastPublicAt: {}
     };
   }
 }
@@ -120,6 +126,51 @@ function weekStartKey(date = new Date()) {
 function monthKey(date = new Date()) {
   const p = nowChicagoParts(date);
   return `${p.year}-${p.month}`;
+}
+
+function snowflakeDate(id) {
+  try {
+    const n = BigInt(String(id));
+    return new Date(Number((n >> 22n) + 1288834974657n));
+  } catch {
+    return null;
+  }
+}
+
+function isWithinDaysBySnowflake(id, days) {
+  const d = snowflakeDate(id);
+  if (!d || Number.isNaN(d.getTime())) return false;
+  const age = Date.now() - d.getTime();
+  return age >= 0 && age <= days * 24 * 60 * 60 * 1000;
+}
+
+function todaySuppressed(state) {
+  const key = localDateKey();
+  if (!state.raidSuppressed[key]) state.raidSuppressed[key] = [];
+  for (const k of Object.keys(state.raidSuppressed)) {
+    if (k !== key) delete state.raidSuppressed[k];
+  }
+  return state.raidSuppressed[key];
+}
+
+function typeLabel(type) {
+  if (type === "quote") return "Quote post";
+  if (type === "reply") return "Reply";
+  if (type === "mention") return "Original mention";
+  return type;
+}
+
+async function isOwnerOrAdmin(userId) {
+  if (!TELEGRAM_CHAT_ID) return false;
+  try {
+    const member = await tg("getChatMember", {
+      chat_id: TELEGRAM_CHAT_ID,
+      user_id: Number(userId)
+    });
+    return member?.status === "creator" || member?.status === "administrator";
+  } catch {
+    return false;
+  }
 }
 
 function activityDate(a) {
@@ -257,6 +308,13 @@ async function searchX(query, limit = 30) {
       ""
     );
 
+    const replyTargetAuthor =
+      t.in_reply_to_screen_name ||
+      t.inReplyToScreenName ||
+      t.replyingTo ||
+      t.legacy?.in_reply_to_screen_name ||
+      "";
+
     const quoted =
       t.quoted_status ||
       t.quotedStatus ||
@@ -289,6 +347,7 @@ async function searchX(query, limit = 30) {
       id, author, text,
       url: url.startsWith("http") ? url : `https://x.com${url}`,
       replyTargetId,
+      replyTargetAuthor,
       quoteTargetId,
       quoteTargetAuthor,
       reply: Boolean(
@@ -307,16 +366,22 @@ function linkedIdByHandle(state, handle) {
     .find(([, link]) => String(link.handle).toLowerCase() === h)?.[0] || null;
 }
 
-function classify(post, spepePostIds = new Set()) {
+function classify(post, spepePostIds = new Set(), sources = new Set()) {
   if (/SPEPE-LINK-[A-Z0-9]+/i.test(post.text)) return "verification";
 
   const quotesSpepe =
     post.quoteTargetAuthor?.toLowerCase() === X_HANDLE.toLowerCase() ||
     (post.quoteTargetId && spepePostIds.has(String(post.quoteTargetId))) ||
-    /https?:\/\/(?:www\.)?x\.com\/SaiyanPEPE\/status\//i.test(post.text);
+    /https?:\/\/(?:www\.)?x\.com\/SaiyanPEPE\/status\//i.test(post.text) ||
+    sources.has("quote");
+
+  const repliesSpepe =
+    post.replyTargetAuthor?.toLowerCase() === X_HANDLE.toLowerCase() ||
+    (post.replyTargetId && spepePostIds.has(String(post.replyTargetId))) ||
+    sources.has("reply");
 
   if (quotesSpepe) return "quote";
-  if (post.reply) return "reply";
+  if (repliesSpepe) return "reply";
   if (/\$SPEPE\b|@SaiyanPEPE\b/i.test(post.text)) return "mention";
   return null;
 }
@@ -384,7 +449,7 @@ async function scanCommunity(state) {
     searchX(`to:${X_HANDLE}`, 30),
     searchX(`$SPEPE OR @${X_HANDLE}`, 30),
     searchX(`url:x.com/${X_HANDLE}/status`, 30),
-    searchX(`from:${X_HANDLE}`, 30),
+    searchX(`from:${X_HANDLE}`, 100),
     ...linkedHandles.slice(0, 20).map(handle => searchX(`from:${handle}`, 20))
   ]);
 
@@ -434,8 +499,16 @@ async function scanCommunity(state) {
       continue;
     }
 
-    const type = classify(post, spepePostIds);
+    const type = classify(post, spepePostIds, post.sources || new Set());
     if (!POINTS[type]) continue;
+
+    if ((type === "reply" || type === "quote")) {
+      const sourceId = type === "quote" ? post.quoteTargetId : post.replyTargetId;
+      if (!sourceId || !isWithinDaysBySnowflake(sourceId, 5)) {
+        console.log(`Old or unverifiable ${type} source ignored for @${post.author}: ${sourceId || "missing"}`);
+        continue;
+      }
+    }
 
     const telegramId = linkedIdByHandle(state, post.author);
     if (!telegramId) continue;
@@ -451,7 +524,12 @@ async function scanCommunity(state) {
     }
 
     const points = POINTS[type];
+    const weeklyRank = rows(state, "weekly").findIndex(r => r.telegramId === telegramId) + 1;
+    const announcementTop = Number(state.announcementTop || 0);
     const shouldHighlight =
+      announcementTop > 0 &&
+      weeklyRank > 0 &&
+      weeklyRank <= announcementTop &&
       (type === "quote" || type === "mention") &&
       !highlightedToday(state, telegramId);
 
@@ -464,6 +542,8 @@ async function scanCommunity(state) {
       sourcePostId: type === "quote" ? (post.quoteTargetId || null) : (type === "reply" ? (post.replyTargetId || null) : null),
       highlighted: shouldHighlight,
       url: post.url,
+      raidEligible: true,
+      raidDate: localDateKey(),
       at: new Date().toISOString()
     });
     state.activities = state.activities.slice(-5000);
@@ -476,6 +556,50 @@ async function scanCommunity(state) {
   }
 
   state.seen = [...seen].slice(-1500);
+}
+
+
+async function raidListText(state) {
+  const today = localDateKey();
+  const suppressed = new Set(todaySuppressed(state).map(String));
+
+  let official = [];
+  try {
+    official = (await searchX(`from:${X_HANDLE}`, 20))
+      .filter(p => localDateKey(snowflakeDate(p.id) || new Date(0)) === today)
+      .filter(p => !suppressed.has(String(p.id)))
+      .slice(0, 10);
+  } catch {}
+
+  const community = state.activities
+    .filter(a => a.raidEligible)
+    .filter(a => a.raidDate === today)
+    .filter(a => !suppressed.has(String(a.id)))
+    .sort((a,b) => Number(b.points || 0) - Number(a.points || 0) || new Date(b.at) - new Date(a.at))
+    .slice(0, 20);
+
+  const lines = [
+    "🐸⚡ SPEPE RAID BOARD",
+    "",
+    "Pick a target. Drop a real reply. Push the signal.",
+    ""
+  ];
+
+  lines.push("🔥 OFFICIAL SAIYANPEPE POSTS");
+  if (!official.length) lines.push("No official posts added today.");
+  official.forEach((p,i) => {
+    lines.push(`${i + 1}) ${p.url}`);
+  });
+
+  lines.push("", "⚡ COMMUNITY SIGNALS");
+  if (!community.length) lines.push("No community posts on the board yet.");
+  community.forEach((a,i) => {
+    lines.push(`${i + 1}) @${a.handle} • ${typeLabel(a.type)} • +${a.points} pts`);
+    lines.push(a.url);
+  });
+
+  lines.push("", "Raid Board resets daily.");
+  return lines.join("\n");
 }
 
 function topText(state, period) {
@@ -496,11 +620,6 @@ async function handleCommand(state, update) {
   const text = message?.text?.trim() || "";
   if (!from?.id || !chat?.id || !text.startsWith("/")) return;
 
-  if (chat.type !== "private") {
-    await sendText(chat.id, "Community account setup works through my private DMs. Open a private chat with me.");
-    return;
-  }
-
   const [raw, ...args] = text.split(/\s+/);
   const cmd = raw.toLowerCase().split("@")[0];
   const id = String(from.id);
@@ -516,6 +635,7 @@ async function handleCommand(state, update) {
       "/top all — all-time Top 10",
       "/badges — your earned titles",
       "/streak — your activity streak",
+      "/raidlist — today's SPEPE Raid Board",
       "",
       "Points:",
       "Replies = 1",
@@ -525,12 +645,16 @@ async function handleCommand(state, update) {
       "Anti-spam:",
       "Up to 3 counted replies, quotes, and mentions per rolling hour.",
       "Only one quote per SaiyanPEPE post can earn points.",
-      "Only one community highlight per person per day."
+      "Only one community highlight per person per day.",
+      "Replies and quote posts only score when the SaiyanPEPE source post is 5 days old or newer."
     ].join("\n"));
     return;
   }
 
   if (cmd === "/link") {
+    if (chat.type !== "private") {
+      return sendText(chat.id, "🔒 Account linking happens in my DMs. Open a private chat with me and use /link @YourXHandle.");
+    }
     const handle = cleanHandle(args[0] || "");
     if (!handle) return sendText(chat.id, "Use /link @YourXHandle");
 
@@ -557,10 +681,80 @@ async function handleCommand(state, update) {
       "That's it. You do NOT need to send me the X link.",
       "The regular SPEPE activity scan will detect your code and link the account automatically.",
       "",
-      "⏳ Verification is checked about every 5 minutes, so please allow at least 5 minutes for it to register.",
+      "⏳ Verification is checked regularly. It usually takes a few minutes, but may occasionally take longer.",
+      "I'll DM you automatically once your X account is verified.",
       "Verification posts do not earn points."
     ].join("\n"), { parse_mode: "HTML" });
     return;
+  }
+
+
+  if (cmd === "/raidlist") {
+    if (chat.type !== "private") {
+      const last = Number(state.raidLastPublicAt[String(chat.id)] || 0);
+      if (Date.now() - last < 2 * 60 * 1000) {
+        return sendText(chat.id, "⚡ Raid Board was just called. Give it a minute before summoning it again.");
+      }
+      state.raidLastPublicAt[String(chat.id)] = Date.now();
+    }
+    return sendText(chat.id, await raidListText(state));
+  }
+
+  if (cmd === "/raidsettings") {
+    const admin = await isOwnerOrAdmin(id);
+    const label = Number(state.announcementTop || 0) === 0 ? "Nobody" : `Top ${state.announcementTop} weekly supporters`;
+    const lines = [
+      "⚙️ SPEPE RAID SETTINGS",
+      "",
+      `Automatic announcements: ${label}`,
+      "Raid Board resets daily.",
+      "Public /raidlist cooldown: 2 minutes."
+    ];
+    if (admin) lines.push("", "Admin: /announcements none|1|5|10|25|50|100", "/raidremove <post number or X post ID>", "/raidclear");
+    return sendText(chat.id, lines.join("\n"));
+  }
+
+  if (cmd === "/announcements") {
+    if (!(await isOwnerOrAdmin(id))) return sendText(chat.id, "Admin only.");
+    const rawChoice = String(args[0] || "").toLowerCase().replace(/^top/, "");
+    const n = rawChoice === "none" ? 0 : Number(rawChoice);
+    if (![0,1,5,10,25,50,100].includes(n)) {
+      return sendText(chat.id, "Use /announcements none, 1, 5, 10, 25, 50, or 100.");
+    }
+    state.announcementTop = n;
+    return sendText(chat.id, n === 0
+      ? "📣 Automatic community post announcements are now off."
+      : `📣 Automatic community post announcements are now limited to the Top ${n} weekly supporters.`);
+  }
+
+  if (cmd === "/raidclear") {
+    if (!(await isOwnerOrAdmin(id))) return sendText(chat.id, "Admin only.");
+    const today = localDateKey();
+    const ids = state.activities.filter(a => a.raidDate === today).map(a => String(a.id));
+    state.raidSuppressed[today] = [...new Set([...(state.raidSuppressed[today] || []), ...ids])];
+    return sendText(chat.id, "🧹 Today's community Raid Board has been cleared.");
+  }
+
+  if (cmd === "/raidremove") {
+    if (!(await isOwnerOrAdmin(id))) return sendText(chat.id, "Admin only.");
+    const arg = String(args[0] || "").trim();
+    if (!arg) return sendText(chat.id, "Use /raidremove <community number or X post ID>.");
+
+    const today = localDateKey();
+    const community = state.activities
+      .filter(a => a.raidEligible && a.raidDate === today)
+      .filter(a => !(state.raidSuppressed[today] || []).includes(String(a.id)))
+      .sort((a,b) => Number(b.points || 0) - Number(a.points || 0) || new Date(b.at) - new Date(a.at))
+      .slice(0, 20);
+
+    let postId = /^\d+$/.test(arg) && Number(arg) >= 1 && Number(arg) <= community.length
+      ? String(community[Number(arg)-1].id)
+      : arg.match(/status\/(\d+)/)?.[1] || (/^\d{10,}$/.test(arg) ? arg : "");
+
+    if (!postId) return sendText(chat.id, "I couldn't identify that Raid Board post.");
+    const list = todaySuppressed(state);
+    if (!list.includes(String(postId))) list.push(String(postId));
+    return sendText(chat.id, `🗑️ Removed post ${postId} from today's Raid Board.`);
   }
 
   if (cmd === "/rank") {
