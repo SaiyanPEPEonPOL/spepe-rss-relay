@@ -28,6 +28,17 @@
       "highlighted": false,
       "url": "https://x.com/kungfukenn_eth/status/2111258963698483441",
       "at": "2026-10-17T01:11:09.713Z"
+    },
+    {
+      "id": "2111458280673366145",
+      "telegramId": "283799261",
+      "handle": "kungfukenn_eth",
+      "type": "quote",
+      "points": 2,
+      "sourcePostId": "2111455710470873355",
+      "highlighted": true,
+      "url": "https://x.com/kungfukenn_eth/status/2111458280673366145",
+      "at": "2026-10-17T14:06:09.826Z"
     }
   ],
   "seen": [
@@ -99,7 +110,8 @@
     "2111258963698483441",
     "2111437241545294042",
     "2111437531019608349",
-    "2111440260471443930"
+    "2111440260471443930",
+    "2111458280673366145"
   ],
   "initialized": true,
   "badges": {},
