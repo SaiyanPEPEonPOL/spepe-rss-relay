@@ -615,10 +615,20 @@ async function raidListText(state) {
 }
 
 
-function raidRepliesText(state) {
+async function raidRepliesText(state) {
   const today = localDateKey();
   const suppressed = new Set(todaySuppressed(state).map(String));
-  const replies = state.activities
+
+  let officialReplies = [];
+  try {
+    officialReplies = (await searchX(`from:${X_HANDLE} filter:replies`, 30))
+      .filter(p => p.reply)
+      .filter(p => localDateKey(snowflakeDate(p.id) || new Date(0)) === today)
+      .filter(p => !suppressed.has(String(p.id)))
+      .slice(0, 20);
+  } catch {}
+
+  const communityReplies = state.activities
     .filter(a => raidActivityEligible(a, today))
     .filter(a => a.type === "reply")
     .filter(a => !suppressed.has(String(a.id)))
@@ -628,21 +638,32 @@ function raidRepliesText(state) {
   const lines = [
     "⚡ SPEPE REPLY RAID",
     "",
-    "These are community replies tied to recent SaiyanPEPE posts.",
-    "Drop a real response, like, repost, or keep the conversation moving.",
-    ""
+    "Keep the conversation moving. Pick a reply, add something real, and push the signal.",
+    "",
+    "🔥 OFFICIAL SPEPE REPLIES"
   ];
 
-  if (!replies.length) {
+  if (!officialReplies.length) {
+    lines.push("No official SPEPE replies are waiting right now.");
+  } else {
+    officialReplies.forEach((p,i) => {
+      lines.push(`${i + 1}) @${X_HANDLE} • Reply`);
+      lines.push(p.url, "");
+    });
+  }
+
+  lines.push("", "⚡ COMMUNITY REPLIES");
+
+  if (!communityReplies.length) {
     lines.push("No eligible community replies are waiting right now.");
   } else {
-    replies.forEach((a,i) => {
+    communityReplies.forEach((a,i) => {
       lines.push(`${i + 1}) @${a.handle} • Reply • +${a.points} pt`);
       lines.push(a.url, "");
     });
   }
 
-  lines.push("Reply Raid resets daily.");
+  lines.push("", "Reply Raid resets daily.");
   return lines.join("\n");
 }
 
@@ -672,7 +693,7 @@ async function handleCommand(state, update) {
     if (chat.type !== "private") {
       return sendText(chat.id, "Open this with me in DM to view the reply raid list.");
     }
-    return sendText(chat.id, raidRepliesText(state));
+    return sendText(chat.id, await raidRepliesText(state));
   }
 
   if (cmd === "/start" || cmd === "/help") {
