@@ -117,5 +117,12 @@
   "badges": {},
   "milestoneSeen": {},
   "lastPromoDate": null,
-  "lastWeeklyRecapKey": null
+  "lastWeeklyRecapKey": null,
+  "announcementTop": 10,
+  "raidSuppressed": {
+    "2026-10-17": []
+  },
+  "raidLastPublicAt": {
+    "-1001805976712": 1792248163047
+  }
 }
