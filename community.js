@@ -306,10 +306,31 @@ async function searchX(query, limit = 30) {
     q: query, feed: "latest", format: "json",
     limit: String(limit), nocache: "true"
   });
-  const r = await fetch("https://x.pcstyle.dev/api/v1/search?" + params, {
-    headers: { "User-Agent": USER_AGENT, "Accept": "application/json" }
-  });
-  if (!r.ok) throw new Error(`x.md search failed: ${r.status}`);
+
+  let r = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    r = await fetch("https://x.pcstyle.dev/api/v1/search?" + params, {
+      headers: { "User-Agent": USER_AGENT, "Accept": "application/json" }
+    });
+
+    if (r.ok) break;
+
+    if (r.status === 429 && attempt < 2) {
+      const waitMs = 1200 * (attempt + 1);
+      console.log(`x.md rate limited for "${query}". Retrying in ${waitMs}ms.`);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      continue;
+    }
+
+    if (r.status === 429) {
+      console.log(`x.md still rate limited for "${query}". Skipping this source until the next scan.`);
+      return [];
+    }
+
+    throw new Error(`x.md search failed: ${r.status}`);
+  }
+
+  if (!r?.ok) return [];
   const data = await r.json();
   return (Array.isArray(data.posts) ? data.posts : []).map(t => {
     const id = String(t.id_str || t.id || t.rest_id || "");
