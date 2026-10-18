@@ -4,6 +4,7 @@ const {
   X_HANDLE = "SaiyanPEPE",
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_CHAT_ID,
+  DISCORD_COMMUNITY_WEBHOOK_URL,
   COMMUNITY_STATE_FILE = "community-state.json",
   COMMUNITY_MODE = "scan",
   TELEGRAM_UPDATE_JSON = ""
@@ -77,6 +78,44 @@ async function sendText(chatId, text, extra = {}) {
     disable_web_page_preview: true,
     ...extra
   });
+}
+
+async function sendDiscordCommunity(text) {
+  if (!DISCORD_COMMUNITY_WEBHOOK_URL) return null;
+
+  const chunks = [];
+  let remaining = String(text || "");
+  while (remaining.length > 1900) {
+    let cut = remaining.lastIndexOf("\n", 1900);
+    if (cut < 500) cut = 1900;
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut).replace(/^\n+/, "");
+  }
+  if (remaining) chunks.push(remaining);
+
+  for (const content of chunks) {
+    const r = await fetch(DISCORD_COMMUNITY_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content,
+        allowed_mentions: { parse: [] }
+      })
+    });
+    if (!r.ok) {
+      throw new Error(`Discord community webhook failed: ${r.status} ${await r.text()}`);
+    }
+  }
+}
+
+async function sendCommunityBroadcast(text) {
+  const jobs = [];
+  if (TELEGRAM_CHAT_ID) jobs.push(sendText(TELEGRAM_CHAT_ID, text));
+  if (DISCORD_COMMUNITY_WEBHOOK_URL) jobs.push(sendDiscordCommunity(text));
+  const results = await Promise.allSettled(jobs);
+  for (const result of results) {
+    if (result.status === "rejected") console.error("Community broadcast failed:", result.reason);
+  }
 }
 
 function escapeHtml(value = "") {
@@ -453,12 +492,11 @@ async function handleVerification(state, post) {
 }
 
 async function announceCommunityPost(post, type, points) {
-  if (!TELEGRAM_CHAT_ID) return;
   const title = type === "quote"
     ? `🔥 COMMUNITY QUOTE +${points}`
     : `⚡ COMMUNITY MENTION +${points}`;
   const body = post.text.replace(/https?:\/\/\S+/gi, "").trim();
-  await sendText(TELEGRAM_CHAT_ID, [
+  await sendCommunityBroadcast([
     title,
     `@${post.author} is showing support.`,
     "",
@@ -475,8 +513,8 @@ async function maybeMilestone(state, telegramId) {
   if (!newly.length) return;
   state.milestoneSeen[telegramId] = [...seen, ...newly].sort((a,b)=>a-b);
   const handle = state.links[telegramId]?.handle;
-  if (TELEGRAM_CHAT_ID && handle) {
-    await sendText(TELEGRAM_CHAT_ID,
+  if (handle) {
+    await sendCommunityBroadcast(
       `🏅 @${handle} just crossed ${newly.at(-1)} community support points!`
     );
   }
@@ -990,13 +1028,13 @@ async function handleCommand(state, update) {
 }
 
 async function maybePromo(state) {
-  if (!TELEGRAM_CHAT_ID) return;
+  if (!TELEGRAM_CHAT_ID && !DISCORD_COMMUNITY_WEBHOOK_URL) return;
   const p = nowChicagoParts();
   const date = localDateKey();
   if (state.lastPromoDate === date) return;
   if (Number(p.hour) !== 11 || Number(p.minute) < 25 || Number(p.minute) > 40) return;
 
-  await sendText(TELEGRAM_CHAT_ID, [
+  await sendCommunityBroadcast([
     "⚡ WANT TO SUPPORT THE COMMUNITY? PROVE IT.",
     "",
     "Reply. Quote. Post.",
@@ -1007,13 +1045,13 @@ async function maybePromo(state) {
     "",
     "Weekly, monthly, and all-time rankings are tracked.",
     "",
-    "DM the bot and use /link @YourXHandle to start showing support today!"
+    "Telegram: DM @SPEPE_bot and use /link @YourXHandle to start showing support today!"
   ].join("\n"));
   state.lastPromoDate = date;
 }
 
 async function maybeWeeklyRecap(state) {
-  if (!TELEGRAM_CHAT_ID) return;
+  if (!TELEGRAM_CHAT_ID && !DISCORD_COMMUNITY_WEBHOOK_URL) return;
   const p = nowChicagoParts();
   if (p.weekday !== "Sun" || Number(p.hour) !== 19) return;
   const key = weekStartKey();
@@ -1025,7 +1063,7 @@ async function maybeWeeklyRecap(state) {
   const quotes = weekActs.filter(a=>a.type==="quote").length;
   const mentions = weekActs.filter(a=>a.type==="mention").length;
 
-  await sendText(TELEGRAM_CHAT_ID, [
+  await sendCommunityBroadcast([
     "🐸 SPEPE WEEKLY COMMUNITY RECAP",
     "",
     `${replies} replies`,
