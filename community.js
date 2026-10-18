@@ -482,31 +482,49 @@ async function maybeMilestone(state, telegramId) {
   }
 }
 
+
+async function verifyPendingLinksFirst(state) {
+  const pending = Object.entries(state.pendingLinks || {})
+    .filter(([, p]) => {
+      const created = new Date(p.createdAt || 0).getTime();
+      return created && Date.now() - created <= 24 * 60 * 60 * 1000;
+    })
+    .slice(0, 10);
+
+  for (const [, p] of pending) {
+    const handle = cleanHandle(p.handle || "");
+    if (!handle || !p.code) continue;
+
+    // Keep verification lightweight and high priority so it is less likely
+    // to be starved by the larger community scan.
+    const matches = await searchX(`from:${handle} "${p.code}"`, 10);
+
+    for (const post of matches) {
+      if (await handleVerification(state, post)) {
+        console.log(`Verified link from @${post.author} using priority verification scan.`);
+        break;
+      }
+    }
+
+    // Avoid hammering x.md when several people are pending at once.
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+}
+
 async function scanCommunity(state) {
   const linkedHandles = Object.values(state.links)
     .map(link => cleanHandle(link.handle || ""))
     .filter(Boolean);
 
-  const pendingHandles = Object.values(state.pendingLinks)
-    .filter(p => {
-      const created = new Date(p.createdAt || 0).getTime();
-      return created && Date.now() - created <= 24 * 60 * 60 * 1000;
-    })
-    .map(p => cleanHandle(p.handle || ""))
-    .filter(Boolean)
-    .slice(0, 10);
+  await verifyPendingLinksFirst(state);
 
-  const [replies, mentions, quoteSearch, spepePosts, ...userFeeds] = await Promise.all([
+  const [replies, mentions, quoteSearch, spepePosts, ...linkedFeeds] = await Promise.all([
     searchX(`to:${X_HANDLE}`, 30),
     searchX(`$SPEPE OR @${X_HANDLE}`, 30),
     searchX(`url:x.com/${X_HANDLE}/status`, 30),
     searchX(`from:${X_HANDLE}`, 100),
-    ...linkedHandles.slice(0, 20).map(handle => searchX(`from:${handle}`, 20)),
-    ...pendingHandles.map(handle => searchX(`from:${handle}`, 10))
+    ...linkedHandles.slice(0, 20).map(handle => searchX(`from:${handle}`, 20))
   ]);
-
-  const linkedFeeds = userFeeds.slice(0, linkedHandles.slice(0, 20).length);
-  const pendingFeeds = userFeeds.slice(linkedHandles.slice(0, 20).length);
 
   const spepePostIds = new Set(spepePosts.map(p => String(p.id)));
 
@@ -525,16 +543,6 @@ async function scanCommunity(state) {
     for (const p of arr) {
       const existing = map.get(p.id) || { ...p, sources: new Set() };
       existing.sources.add("linked-feed");
-      if (p.reply) existing.reply = true;
-      if (p.quote) existing.quote = true;
-      map.set(p.id, existing);
-    }
-  }
-
-  for (const arr of pendingFeeds) {
-    for (const p of arr) {
-      const existing = map.get(p.id) || { ...p, sources: new Set() };
-      existing.sources.add("pending-feed");
       if (p.reply) existing.reply = true;
       if (p.quote) existing.quote = true;
       map.set(p.id, existing);
