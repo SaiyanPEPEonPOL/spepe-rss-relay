@@ -144,6 +144,11 @@ function isWithinDaysBySnowflake(id, days) {
   return age >= 0 && age <= days * 24 * 60 * 60 * 1000;
 }
 
+function postTimestamp(post) {
+  const d = snowflakeDate(post?.id);
+  return d && !Number.isNaN(d.getTime()) ? d : new Date();
+}
+
 function todaySuppressed(state) {
   const key = localDateKey();
   if (!state.raidSuppressed[key]) state.raidSuppressed[key] = [];
@@ -582,6 +587,13 @@ async function scanCommunity(state) {
     const telegramId = linkedIdByHandle(state, post.author);
     if (!telegramId) continue;
 
+    const linkedAt = new Date(state.links[telegramId]?.linkedAt || 0).getTime();
+    const postAt = postTimestamp(post);
+    if (linkedAt && postAt.getTime() < linkedAt) {
+      console.log(`Pre-link activity ignored for @${post.author}: ${post.id}`);
+      continue;
+    }
+
     if (countLastHour(state, telegramId, type) >= HOURLY_CAPS[type]) {
       console.log(`Rolling hourly ${type} cap reached for @${post.author}`);
       continue;
@@ -612,8 +624,8 @@ async function scanCommunity(state) {
       highlighted: shouldHighlight,
       url: post.url,
       raidEligible: true,
-      raidDate: localDateKey(),
-      at: new Date().toISOString()
+      raidDate: localDateKey(postAt),
+      at: postAt.toISOString()
     });
     state.activities = state.activities.slice(-5000);
 
