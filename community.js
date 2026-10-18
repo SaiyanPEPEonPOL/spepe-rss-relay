@@ -482,13 +482,26 @@ async function scanCommunity(state) {
     .map(link => cleanHandle(link.handle || ""))
     .filter(Boolean);
 
-  const [replies, mentions, quoteSearch, spepePosts, ...linkedFeeds] = await Promise.all([
+  const pendingHandles = Object.values(state.pendingLinks)
+    .filter(p => {
+      const created = new Date(p.createdAt || 0).getTime();
+      return created && Date.now() - created <= 24 * 60 * 60 * 1000;
+    })
+    .map(p => cleanHandle(p.handle || ""))
+    .filter(Boolean)
+    .slice(0, 10);
+
+  const [replies, mentions, quoteSearch, spepePosts, ...userFeeds] = await Promise.all([
     searchX(`to:${X_HANDLE}`, 30),
     searchX(`$SPEPE OR @${X_HANDLE}`, 30),
     searchX(`url:x.com/${X_HANDLE}/status`, 30),
     searchX(`from:${X_HANDLE}`, 100),
-    ...linkedHandles.slice(0, 20).map(handle => searchX(`from:${handle}`, 20))
+    ...linkedHandles.slice(0, 20).map(handle => searchX(`from:${handle}`, 20)),
+    ...pendingHandles.map(handle => searchX(`from:${handle}`, 10))
   ]);
+
+  const linkedFeeds = userFeeds.slice(0, linkedHandles.slice(0, 20).length);
+  const pendingFeeds = userFeeds.slice(linkedHandles.slice(0, 20).length);
 
   const spepePostIds = new Set(spepePosts.map(p => String(p.id)));
 
@@ -507,6 +520,16 @@ async function scanCommunity(state) {
     for (const p of arr) {
       const existing = map.get(p.id) || { ...p, sources: new Set() };
       existing.sources.add("linked-feed");
+      if (p.reply) existing.reply = true;
+      if (p.quote) existing.quote = true;
+      map.set(p.id, existing);
+    }
+  }
+
+  for (const arr of pendingFeeds) {
+    for (const p of arr) {
+      const existing = map.get(p.id) || { ...p, sources: new Set() };
+      existing.sources.add("pending-feed");
       if (p.reply) existing.reply = true;
       if (p.quote) existing.quote = true;
       map.set(p.id, existing);
