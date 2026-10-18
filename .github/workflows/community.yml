@@ -38,6 +38,7 @@ jobs:
           X_HANDLE: "SaiyanPEPE"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_COMMUNITY_WEBHOOK_URL: ${{ secrets.DISCORD_COMMUNITY_WEBHOOK_URL }}
           COMMUNITY_STATE_FILE: "community-state.json"
           COMMUNITY_MODE: ${{ inputs.mode }}
           TELEGRAM_UPDATE_JSON: ${{ inputs.telegram_update }}
