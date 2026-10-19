@@ -459,7 +459,8 @@ function classify(post, spepePostIds = new Set(), sources = new Set()) {
   const repliesSpepe =
     post.replyTargetAuthor?.toLowerCase() === X_HANDLE.toLowerCase() ||
     (post.replyTargetId && spepePostIds.has(String(post.replyTargetId))) ||
-    sources.has("reply");
+    sources.has("reply") ||
+    (post.reply && /@SaiyanPEPE\b/i.test(post.text));
 
   if (quotesSpepe) return "quote";
   if (repliesSpepe) return "reply";
