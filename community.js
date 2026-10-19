@@ -639,7 +639,8 @@ async function scanCommunity(state) {
 
     const linkedAt = new Date(state.links[telegramId]?.linkedAt || 0).getTime();
     const postAt = postTimestamp(post);
-    if (linkedAt && postAt.getTime() < linkedAt) {
+    const LINK_GRACE_MS = 10 * 60 * 1000;
+    if (linkedAt && postAt.getTime() < linkedAt - LINK_GRACE_MS) {
       console.log(`Pre-link activity ignored for @${post.author}: ${post.id}`);
       continue;
     }
