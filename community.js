@@ -535,7 +535,10 @@ async function verifyPendingLinksFirst(state) {
 
     // Keep verification lightweight and high priority so it is less likely
     // to be starved by the larger community scan.
-    const matches = await searchX(`from:${handle} "${p.code}"`, 10);
+    const recentPosts = await searchX(`from:${handle}`, 30);
+    const matches = recentPosts.filter(post =>
+      String(post.text || "").includes(p.code)
+    );
 
     for (const post of matches) {
       if (await handleVerification(state, post)) {
