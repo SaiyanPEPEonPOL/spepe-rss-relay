@@ -153,6 +153,19 @@
       "raidEligible": true,
       "raidDate": "2026-10-20",
       "at": "2026-10-20T17:44:07.117Z"
+    },
+    {
+      "id": "2112625441676918999",
+      "telegramId": "283799261",
+      "handle": "kungfukenn_eth",
+      "type": "reply",
+      "points": 1,
+      "sourcePostId": null,
+      "highlighted": false,
+      "url": "https://x.com/kungfukenn_eth/status/2112625441676918999",
+      "raidEligible": true,
+      "raidDate": "2026-10-20",
+      "at": "2026-10-20T19:22:10.635Z"
     }
   ],
   "seen": [
@@ -401,7 +414,9 @@
     "2112593867035803715",
     "2112600764413624530",
     "2112608299048948159",
-    "2112617653978419693"
+    "2112617653978419693",
+    "2112625441676918999",
+    "2112625536581140839"
   ],
   "initialized": true,
   "badges": {},
