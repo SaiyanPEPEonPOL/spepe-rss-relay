@@ -166,6 +166,32 @@
       "raidEligible": true,
       "raidDate": "2026-10-20",
       "at": "2026-10-20T19:22:10.635Z"
+    },
+    {
+      "id": "2112904631256748063",
+      "telegramId": "7304065731",
+      "handle": "0xhilal",
+      "type": "reply",
+      "points": 1,
+      "sourcePostId": null,
+      "highlighted": false,
+      "url": "https://x.com/0xhilal/status/2112904631256748063",
+      "raidEligible": true,
+      "raidDate": "2026-10-21",
+      "at": "2026-10-21T13:51:34.618Z"
+    },
+    {
+      "id": "2112905286549753931",
+      "telegramId": "7565707128",
+      "handle": "Pentacles89",
+      "type": "reply",
+      "points": 1,
+      "sourcePostId": null,
+      "highlighted": false,
+      "url": "https://x.com/Pentacles89/status/2112905286549753931",
+      "raidEligible": true,
+      "raidDate": "2026-10-21",
+      "at": "2026-10-21T13:54:10.852Z"
     }
   ],
   "seen": [
@@ -440,7 +466,9 @@
     "2112894218045686219",
     "2112894641532199359",
     "2112895657082224873",
-    "2112895799462129691"
+    "2112895799462129691",
+    "2112904631256748063",
+    "2112905286549753931"
   ],
   "initialized": true,
   "badges": {},
