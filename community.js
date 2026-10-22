@@ -464,7 +464,7 @@ function classify(post, spepePostIds = new Set(), sources = new Set()) {
 
   if (quotesSpepe) return "quote";
   if (repliesSpepe) return "reply";
-  if (!post.reply && /\$SPEPE\b|@SaiyanPEPE\b/i.test(post.text)) return "mention";
+  if (!post.reply && !post.quote && /\$SPEPE\b|@SaiyanPEPE\b/i.test(post.text)) return "mention";
   return null;
 }
 
@@ -569,9 +569,10 @@ async function scanCommunity(state) {
     searchX(`from:${X_HANDLE}`, 100)
   ]);
 
-  const [linkedFeeds, linkedReplyFeeds] = await Promise.all([
+  const [linkedFeeds, linkedReplyFeeds, linkedQuoteFeeds] = await Promise.all([
     Promise.all(activeHandles.map(handle => searchX(`from:${handle}`, 20))),
-    Promise.all(activeHandles.map(handle => searchX(`from:${handle} to:${X_HANDLE}`, 20)))
+    Promise.all(activeHandles.map(handle => searchX(`from:${handle} to:${X_HANDLE}`, 20))),
+    Promise.all(activeHandles.map(handle => searchX(`from:${handle} url:x.com/${X_HANDLE}/status`, 20)))
   ]);
 
   const spepePostIds = new Set(spepePosts.map(p => String(p.id)));
@@ -603,6 +604,16 @@ async function scanCommunity(state) {
       existing.sources.add("reply");
       existing.sources.add("linked-reply-feed");
       existing.reply = true;
+      map.set(p.id, existing);
+    }
+  }
+
+  for (const arr of linkedQuoteFeeds) {
+    for (const p of arr) {
+      const existing = map.get(p.id) || { ...p, sources: new Set() };
+      existing.sources.add("quote");
+      existing.sources.add("linked-quote-feed");
+      existing.quote = true;
       map.set(p.id, existing);
     }
   }
