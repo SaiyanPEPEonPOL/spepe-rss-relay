@@ -17,7 +17,7 @@ const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-const POINTS = { reply: 1, quote: 2, mention: 3 };
+const POINTS = { reply: 1, quote: 2, mention: 3, repost: 0 };
 const HOURLY_CAPS = { reply: 3, quote: 3, mention: 3 };
 const MILESTONES = [25, 50, 100, 250, 500, 1000];
 
@@ -404,6 +404,29 @@ async function searchX(query, limit = 30) {
       t.quote ||
       null;
 
+    const reposted =
+      t.retweeted_status ||
+      t.retweetedStatus ||
+      t.retweet ||
+      t.reposted_status ||
+      t.repostedStatus ||
+      null;
+
+    const repostTargetAuthor =
+      reposted?.user?.screen_name ||
+      reposted?.author?.screen_name ||
+      reposted?.author?.username ||
+      "";
+
+    const repostTargetId = String(
+      t.retweeted_status_id_str ||
+      t.retweetedStatusId ||
+      reposted?.id_str ||
+      reposted?.id ||
+      reposted?.rest_id ||
+      ""
+    );
+
     const quoteTargetAuthor =
       quoted?.user?.screen_name ||
       quoted?.author?.screen_name ||
@@ -431,11 +454,16 @@ async function searchX(query, limit = 30) {
       replyTargetAuthor,
       quoteTargetId,
       quoteTargetAuthor,
+      repostTargetId,
+      repostTargetAuthor,
       reply: Boolean(
         replyTargetId || t.replyingTo
       ),
       quote: Boolean(
         quoteTargetId || quoted
+      ),
+      repost: Boolean(
+        repostTargetId || reposted
       )
     };
   }).filter(p => p.id && p.author && p.url);
@@ -450,6 +478,10 @@ function linkedIdByHandle(state, handle) {
 function classify(post, spepePostIds = new Set(), sources = new Set()) {
   if (/SPEPE-LINK-[A-Z0-9]+/i.test(post.text)) return "verification";
 
+  const repostsSpepe =
+    post.repostTargetAuthor?.toLowerCase() === X_HANDLE.toLowerCase() ||
+    (post.repostTargetId && spepePostIds.has(String(post.repostTargetId)));
+
   const quotesSpepe =
     post.quoteTargetAuthor?.toLowerCase() === X_HANDLE.toLowerCase() ||
     (post.quoteTargetId && spepePostIds.has(String(post.quoteTargetId))) ||
@@ -462,9 +494,10 @@ function classify(post, spepePostIds = new Set(), sources = new Set()) {
     sources.has("reply") ||
     (post.reply && /@SaiyanPEPE\b/i.test(post.text));
 
+  if (repostsSpepe) return "repost";
   if (quotesSpepe) return "quote";
   if (repliesSpepe) return "reply";
-  if (!post.reply && !post.quote && /\$SPEPE\b|@SaiyanPEPE\b/i.test(post.text)) return "mention";
+  if (!post.reply && !post.quote && !post.repost && /\$SPEPE\b|@SaiyanPEPE\b/i.test(post.text)) return "mention";
   return null;
 }
 
@@ -642,6 +675,10 @@ async function scanCommunity(state) {
     }
 
     const type = classify(post, spepePostIds, post.sources || new Set());
+    if (type === "repost") {
+      console.log(`Plain repost ignored for scoring: @${post.author} ${post.id}`);
+      continue;
+    }
     if (!POINTS[type]) continue;
 
     if ((type === "reply" || type === "quote")) {
