@@ -42,7 +42,7 @@ async function fetchXRecent(env, workspace = "spepe") {
   if (!ws) throw new Error("Unknown workspace");
   const key = "recent-search";
   const state = await env.DB.prepare("SELECT last_post_id FROM ingestion_state WHERE workspace_id = ? AND source_key = ?").bind(workspace,key).first();
-  const query = `(from:${ws.tracked_handle} OR to:${ws.tracked_handle} OR @${ws.tracked_handle} OR $SPEPE) -is:nullcast`;
+  const query = `(from:${ws.tracked_handle} OR to:${ws.tracked_handle} OR @${ws.tracked_handle} OR $SPEPE)`;
   const params = new URLSearchParams({
     query, max_results:"100",
     "tweet.fields":"author_id,created_at,referenced_tweets",
