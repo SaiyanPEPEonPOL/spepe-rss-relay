@@ -586,30 +586,47 @@ async function verifyPendingLinksFirst(state) {
   }
 }
 
-async function scanCommunity(state) {
-  const linkedHandles = Object.values(state.links)
-    .map(link => cleanHandle(link.handle || ""))
-    .filter(Boolean);
+async function resolveAmbiguousCommunityPost(post) {
+  // Only pay for a user-specific lookup when a NEW linked-user post would
+  // otherwise be treated as a generic mention. This replaces the old model
+  // of querying every linked account every five minutes.
+  if (!post?.author || post.reply || post.quote || post.repost) return post;
 
+  try {
+    const recent = await searchX(`from:${cleanHandle(post.author)}`, 12);
+    const exact = recent.find(p => String(p.id) === String(post.id));
+    if (!exact) return post;
+
+    return {
+      ...post,
+      replyTargetId: exact.replyTargetId || post.replyTargetId,
+      replyTargetAuthor: exact.replyTargetAuthor || post.replyTargetAuthor,
+      quoteTargetId: exact.quoteTargetId || post.quoteTargetId,
+      quoteTargetAuthor: exact.quoteTargetAuthor || post.quoteTargetAuthor,
+      repostTargetId: exact.repostTargetId || post.repostTargetId,
+      repostTargetAuthor: exact.repostTargetAuthor || post.repostTargetAuthor,
+      reply: Boolean(post.reply || exact.reply),
+      quote: Boolean(post.quote || exact.quote),
+      repost: Boolean(post.repost || exact.repost)
+    };
+  } catch (err) {
+    console.log(`Ambiguous post lookup skipped for @${post.author}: ${err.message}`);
+    return post;
+  }
+}
+
+async function scanCommunity(state) {
   await verifyPendingLinksFirst(state);
 
-  const activeHandles = linkedHandles.slice(0, 20);
-
-  const [replies, mentions, quoteSearch, spepePosts] = await Promise.all([
-    searchX(`to:${X_HANDLE}`, 30),
-    searchX(`$SPEPE OR @${X_HANDLE}`, 30),
-    searchX(`url:x.com/${X_HANDLE}/status`, 30),
-    searchX(`from:${X_HANDLE}`, 100)
+  // Global-first discovery: keep the steady-state scan small regardless of
+  // how many community members are linked.
+  const [replies, mentions, quoteSearch] = await Promise.all([
+    searchX(`to:${X_HANDLE}`, 50),
+    searchX(`$SPEPE OR @${X_HANDLE}`, 50),
+    searchX(`url:x.com/${X_HANDLE}/status`, 50)
   ]);
 
-  const [linkedFeeds, linkedReplyFeeds, linkedQuoteFeeds] = await Promise.all([
-    Promise.all(activeHandles.map(handle => searchX(`from:${handle}`, 20))),
-    Promise.all(activeHandles.map(handle => searchX(`from:${handle} to:${X_HANDLE}`, 20))),
-    Promise.all(activeHandles.map(handle => searchX(`from:${handle} url:x.com/${X_HANDLE}/status`, 20)))
-  ]);
-
-  const spepePostIds = new Set(spepePosts.map(p => String(p.id)));
-
+  const spepePostIds = new Set();
   const map = new Map();
   for (const [source, arr] of [["reply", replies], ["mention", mentions], ["quote", quoteSearch]]) {
     for (const p of arr) {
@@ -617,36 +634,6 @@ async function scanCommunity(state) {
       existing.sources.add(source);
       if (source === "reply") existing.reply = true;
       if (source === "quote") existing.quote = true;
-      map.set(p.id, existing);
-    }
-  }
-
-  for (const arr of linkedFeeds) {
-    for (const p of arr) {
-      const existing = map.get(p.id) || { ...p, sources: new Set() };
-      existing.sources.add("linked-feed");
-      if (p.reply) existing.reply = true;
-      if (p.quote) existing.quote = true;
-      map.set(p.id, existing);
-    }
-  }
-
-  for (const arr of linkedReplyFeeds) {
-    for (const p of arr) {
-      const existing = map.get(p.id) || { ...p, sources: new Set() };
-      existing.sources.add("reply");
-      existing.sources.add("linked-reply-feed");
-      existing.reply = true;
-      map.set(p.id, existing);
-    }
-  }
-
-  for (const arr of linkedQuoteFeeds) {
-    for (const p of arr) {
-      const existing = map.get(p.id) || { ...p, sources: new Set() };
-      existing.sources.add("quote");
-      existing.sources.add("linked-quote-feed");
-      existing.quote = true;
       map.set(p.id, existing);
     }
   }
@@ -674,18 +661,34 @@ async function scanCommunity(state) {
       continue;
     }
 
-    const type = classify(post, spepePostIds, post.sources || new Set());
+    const linkedTelegramId = linkedIdByHandle(state, post.author);
+    let resolvedPost = post;
+
+    if (
+      linkedTelegramId &&
+      post.sources?.has("mention") &&
+      !post.sources?.has("reply") &&
+      !post.sources?.has("quote") &&
+      !post.reply &&
+      !post.quote &&
+      !post.repost
+    ) {
+      resolvedPost = await resolveAmbiguousCommunityPost(post);
+      resolvedPost.sources = post.sources;
+    }
+
+    const type = classify(resolvedPost, spepePostIds, resolvedPost.sources || new Set());
     if (type === "repost") {
-      console.log(`Plain repost ignored for scoring: @${post.author} ${post.id}`);
+      console.log(`Plain repost ignored for scoring: @${resolvedPost.author} ${resolvedPost.id}`);
       continue;
     }
     if (!POINTS[type]) continue;
 
     if ((type === "reply" || type === "quote")) {
-      const sourceId = type === "quote" ? post.quoteTargetId : post.replyTargetId;
+      const sourceId = type === "quote" ? resolvedPost.quoteTargetId : resolvedPost.replyTargetId;
       const sourceConfirmedBySearch =
         type === "reply" &&
-        post.sources?.has("reply");
+        resolvedPost.sources?.has("reply");
 
       if (sourceId) {
         if (!isWithinDaysBySnowflake(sourceId, 5)) {
@@ -698,11 +701,11 @@ async function scanCommunity(state) {
       }
     }
 
-    const telegramId = linkedIdByHandle(state, post.author);
+    const telegramId = linkedTelegramId || linkedIdByHandle(state, resolvedPost.author);
     if (!telegramId) continue;
 
     const linkedAt = new Date(state.links[telegramId]?.linkedAt || 0).getTime();
-    const postAt = postTimestamp(post);
+    const postAt = postTimestamp(resolvedPost);
     const LINK_GRACE_MS = 10 * 60 * 1000;
     if (linkedAt && postAt.getTime() < linkedAt - LINK_GRACE_MS) {
       console.log(`Pre-link activity ignored for @${post.author}: ${post.id}`);
@@ -714,8 +717,8 @@ async function scanCommunity(state) {
       continue;
     }
 
-    if (type === "quote" && hasQuoteCreditForSource(state, telegramId, post.quoteTargetId)) {
-      console.log(`Duplicate quote source ignored for @${post.author}: ${post.quoteTargetId}`);
+    if (type === "quote" && hasQuoteCreditForSource(state, telegramId, resolvedPost.quoteTargetId)) {
+      console.log(`Duplicate quote source ignored for @${resolvedPost.author}: ${resolvedPost.quoteTargetId}`);
       continue;
     }
 
@@ -730,14 +733,14 @@ async function scanCommunity(state) {
       !highlightedToday(state, telegramId);
 
     state.activities.push({
-      id: post.id,
+      id: resolvedPost.id,
       telegramId,
-      handle: post.author,
+      handle: resolvedPost.author,
       type,
       points,
-      sourcePostId: type === "quote" ? (post.quoteTargetId || null) : (type === "reply" ? (post.replyTargetId || null) : null),
+      sourcePostId: type === "quote" ? (resolvedPost.quoteTargetId || null) : (type === "reply" ? (resolvedPost.replyTargetId || null) : null),
       highlighted: shouldHighlight,
-      url: post.url,
+      url: resolvedPost.url,
       raidEligible: true,
       raidDate: localDateKey(postAt),
       at: postAt.toISOString()
@@ -745,7 +748,7 @@ async function scanCommunity(state) {
     state.activities = state.activities.slice(-5000);
 
     if (shouldHighlight) {
-      try { await announceCommunityPost(post, type, points); } catch {}
+      try { await announceCommunityPost(resolvedPost, type, points); } catch {}
     }
 
     await maybeMilestone(state, telegramId);
