@@ -4,7 +4,7 @@
   "compatibility_date": "2026-10-01",
   "triggers": { "crons": [] },
   "d1_databases": [
-    { "binding": "DB", "database_name": "spepe-social-index", "database_id": "REPLACE_WITH_D1_DATABASE_ID" }
+    { "binding": "DB", "database_name": "spepe-social-index", "database_id": "55f6df32-808f-4613-bd40-836863ef155c" }
   ],
   "vars": { "ENABLE_X_INGESTION": "false" }
 }
