@@ -439,6 +439,19 @@
       "raidEligible": true,
       "raidDate": "2026-10-23",
       "at": "2026-10-23T14:41:56.577Z"
+    },
+    {
+      "id": "2113677960330822010",
+      "telegramId": "7304065731",
+      "handle": "0xhilal",
+      "type": "reply",
+      "points": 1,
+      "sourcePostId": null,
+      "highlighted": false,
+      "url": "https://x.com/0xhilal/status/2113677960330822010",
+      "raidEligible": true,
+      "raidDate": "2026-10-23",
+      "at": "2026-10-23T17:04:30.637Z"
     }
   ],
   "seen": [
@@ -818,7 +831,8 @@
     "2113655217111601253",
     "2113655913533846005",
     "2113656175526904239",
-    "2113656523540873632"
+    "2113656523540873632",
+    "2113677960330822010"
   ],
   "initialized": true,
   "badges": {},
